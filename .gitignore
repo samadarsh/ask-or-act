@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+.venv/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Secrets — API keys live in the environment, never in the repo.
+.env
+.env.*
+
+# Downloaded datasets and raw API responses (regenerable, can be large).
+data/raw/
+data/cache/
+
+.DS_Store
