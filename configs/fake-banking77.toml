@@ -1,0 +1,34 @@
+# Smoke run: a perfectly calibrated fake decider on the Banking77 test half.
+# Costs nothing and calls no API.  ask-or-act run configs/fake-banking77.toml
+name = "fake-banking77"
+
+[dataset]
+manifest = "data/samples/banking77.json"
+split = "test"            # calibration | test | all
+# limit = 100             # optional: seeded-random subset for quick checks
+
+[decider]
+type = "fake"
+model = "fake-calibrated-v1"
+prompt_version = "none"
+
+[decider.params]
+kind = "calibrated"       # perfect | random | constant | calibrated | overconfident
+seed = 7
+low = 0.5
+high = 1.0
+
+[execution]
+max_concurrency = 8
+requests_per_minute = 6000
+timeout_s = 30
+max_retries = 3
+
+[budget]
+max_usd = 0.0             # required. A fake costs $0; a real provider must set this.
+
+[cache]
+path = ".cache/decisions.sqlite"
+
+[output]
+runs_dir = "runs"

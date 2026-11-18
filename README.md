@@ -54,6 +54,11 @@ uv run ruff check       # lint
 uv run ruff format      # format
 uv run mypy             # type check (strict)
 uv run ask-or-act --version
+
+# Run a (free) fake decider over the Banking77 sample:
+uv sync --all-extras
+uv run ask-or-act run configs/fake-banking77.toml --dry-run   # plan + cost estimate only
+uv run ask-or-act run configs/fake-banking77.toml             # saved under runs/
 ```
 
 CI runs all of these on Python 3.12, 3.13 and 3.14.

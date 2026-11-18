@@ -18,4 +18,8 @@ htmlcov/
 data/raw/
 data/cache/
 
+# Decision cache and run outputs (local; study runs get committed deliberately later).
+.cache/
+runs/
+
 .DS_Store

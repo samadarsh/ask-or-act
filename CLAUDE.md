@@ -40,7 +40,26 @@ uv run pytest               # tests
 uv run ruff check           # lint      (uv run ruff check --fix to autofix)
 uv run ruff format          # format
 uv run mypy                 # strict type check of src/ and tests/
+uv sync --all-extras        # + optional `data` deps (huggingface-hub, pyarrow)
+uv run ask-or-act run configs/fake-banking77.toml --dry-run   # plan + cost, no calls
+uv run ask-or-act run configs/fake-banking77.toml             # run, cache, save to runs/
 ```
+
+Architecture (milestone 1):
+
+- `core/types.py`: Example, Decision, DeciderConfig.
+- `core/decider.py`: the Decider Protocol.
+- `core/runner.py`: cache, then budget, then concurrency, rate limits, retries and
+  timeouts.
+- `core/cache.py`: SQLite cache keyed by sha256 of (config, model, prompt version,
+  input).
+- `core/runs.py`: `runs/<id>/run.json` and `runs/<id>/decisions.jsonl`.
+- `deciders/`: registry plus the fake deciders.
+- `run.py`: the `run` command.
+
+A new provider is one class that satisfies `Decider`, plus one line in
+`deciders/__init__.py`. Bump `prompt_version` whenever a prompt changes, or the cache
+will serve stale answers.
 
 CI (`.github/workflows/ci.yml`) runs lint, format check, mypy and pytest on 3.12–3.14.
 All four must pass before a change is done.
@@ -94,6 +113,18 @@ All four must pass before a change is done.
   - Name the option key carefully. The Decisions API sorts keys alphabetically and warns
     against positional names like `none_of_the_above`.
   - Report results with and without the extra option.
+
+- **Self-consistency and the cache:** the cache key must include the sample index
+  (and the temperature, which is already in `params`). Otherwise k samples of the same
+  input hit the same key and come back identical. Model it as k distinct cached calls,
+  keyed by `sample_index` = 0..k-1.
+- **`--refresh` flag** for `ask-or-act run`: bypass cache reads, still write fresh
+  results. This is needed for model-drift checks and for the cross-model study, where
+  "same config, new answer" is the whole point.
+- **Cost accounting:** every Decision has `cost_usd` (the true cost, kept on cache
+  hits) and `charged_usd` (what this run paid: 0 when cached, the estimate share when a
+  call failed). The study reports cost per decision from `cost_usd`. Budgets are
+  enforced on what's charged.
 
 **Data handling (all milestones)**
 - Banking77: the classic baseline trains on the official train split only. The 1,540

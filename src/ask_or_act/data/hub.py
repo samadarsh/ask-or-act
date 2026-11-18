@@ -76,6 +76,19 @@ def load_candidates(name: str, paths: Sequence[Path]) -> list[Candidate]:
     raise KeyError(f"unknown dataset {name!r}; choose from {sorted(DATASETS)}")
 
 
+def rows_by_id(name: str, paths: Sequence[Path]) -> tuple[dict[str, Row], list[str]]:
+    """Raw rows keyed by the same ids the manifests use, plus class names if any."""
+    if name == "banking77":
+        rows, features = read_parquet(paths[0])
+        return {f"test:{i}": r for i, r in enumerate(rows)}, list(features["label"]["names"])
+    if name == "mt_bench":
+        rows, _ = read_parquet(paths[0])
+        return {f"human:{i}": r for i, r in enumerate(rows)}, []
+    if name == "aegis":
+        return {str(r["id"]): r for p in paths for r in read_json_rows(p)}, []
+    raise KeyError(f"unknown dataset {name!r}; choose from {sorted(DATASETS)}")
+
+
 def build_manifest(name: str, raw_dir: Path, seed: int) -> Manifest:
     spec = DATASETS[name]
     candidates = load_candidates(name, fetch(spec.source, raw_dir))

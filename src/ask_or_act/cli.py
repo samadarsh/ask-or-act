@@ -38,7 +38,26 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--samples-dir", type=Path, default=DEFAULT_SAMPLES_DIR)
         if cmd == "sample":
             p.add_argument("--seed", type=int, default=DEFAULT_SEED)
+
+    run = sub.add_parser("run", help="run a decider over a dataset sample (see configs/)")
+    run.add_argument("config", type=Path, help="run config file (TOML)")
+    run.add_argument("--dry-run", action="store_true", help="show plan and cost; call nothing")
+    run.add_argument("--yes", action="store_true", help="approve a run with nonzero cost")
+    run.add_argument("--raw-dir", type=Path, default=DEFAULT_RAW_DIR)
     return parser
+
+
+def _run_run(args: argparse.Namespace) -> int:
+    from ask_or_act.core.config import ConfigError
+    from ask_or_act.run import run_from_config
+
+    try:
+        return run_from_config(
+            args.config, raw_dir=args.raw_dir, dry_run=args.dry_run, approve_spend=args.yes
+        ).exit_code
+    except (ConfigError, manifest.ManifestError, FileNotFoundError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
 
 
 def _run_data(args: argparse.Namespace) -> int:
@@ -76,5 +95,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if unknown:
             parser.error(f"unknown dataset(s) {unknown}; choose from {list(DATASETS)}")
         return _run_data(args)
+    if args.command == "run":
+        return _run_run(args)
     parser.print_help()
     return 0
