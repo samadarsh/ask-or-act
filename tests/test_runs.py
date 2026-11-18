@@ -4,24 +4,43 @@ from pathlib import Path
 
 import pytest
 
-from ask_or_act.core.runs import environment_info, git_info, load_run, make_run_id, save_run
-from ask_or_act.core.types import Decision
+from ask_or_act.core.runs import (
+    GoldRecord,
+    environment_info,
+    git_info,
+    load_run,
+    make_run_id,
+    save_run,
+)
+from ask_or_act.core.types import Decision, Example
 
 
 def test_save_and_load_round_trip(tmp_path: Path) -> None:
     decisions = [Decision("a", "x", 0.9, cost_usd=0.1), Decision.failed("b", "boom")]
-    path = save_run(tmp_path, "run-1", {"name": "t", "seed": 7}, decisions)
+    examples = [
+        Example("a", "SECRET INPUT", ("x", "y"), "x", {"judge": "j1"}),
+        Example("b", "SECRET INPUT", ("x", "y"), "y"),
+    ]
+    path = save_run(tmp_path, "run-1", {"name": "t", "seed": 7}, decisions, examples)
     record = load_run(path)
     assert record.metadata == {"run_id": "run-1", "name": "t", "seed": 7}
     assert record.decisions == decisions
+    assert record.examples == [GoldRecord.of(e) for e in examples]
+    # Gold labels and metadata are saved; input text never is.
+    assert "SECRET" not in (path / "examples.jsonl").read_text()
     # Atomic write: no temp directories left behind.
     assert [p.name for p in tmp_path.iterdir()] == ["run-1"]
 
 
 def test_never_overwrites_a_run(tmp_path: Path) -> None:
-    save_run(tmp_path, "run-1", {}, [])
+    save_run(tmp_path, "run-1", {}, [], [])
     with pytest.raises(FileExistsError):
-        save_run(tmp_path, "run-1", {}, [])
+        save_run(tmp_path, "run-1", {}, [], [])
+
+
+def test_decisions_and_examples_must_align(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="aligned"):
+        save_run(tmp_path, "r", {}, [Decision("a", "x", 0.5)], [GoldRecord("b", "x", ("x", "y"))])
 
 
 def test_run_ids_are_timestamped_and_unique_within_a_second() -> None:

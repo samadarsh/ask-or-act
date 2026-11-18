@@ -59,6 +59,8 @@ uv run ask-or-act --version
 uv sync --all-extras
 uv run ask-or-act run configs/fake-banking77.toml --dry-run   # plan + cost estimate only
 uv run ask-or-act run configs/fake-banking77.toml             # saved under runs/
+uv run ask-or-act metrics runs/<run-id>                       # metrics with 95% CIs
+uv run ask-or-act metrics runs/<run-a> runs/<run-b>           # paired comparison
 ```
 
 CI runs all of these on Python 3.12, 3.13 and 3.14.

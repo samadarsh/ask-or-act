@@ -73,9 +73,32 @@ Kotte, 2026. [arXiv:2606.29054](https://arxiv.org/abs/2606.29054). v1 is dated
   target α is unreachable unless you escalate at least X% of traffic" before it searches
   for thresholds.
 
-**⚠ Open item:** the v1 abstract states the bound as (μ−α)/(1−α), and the v2 abstract
-appears to state it as (μ−α)/(M−α), where M is presumably the maximum loss. Check the v2
-PDF body and cite the exact statement and version before implementing.
+**Resolved (2026-11-18): v1 and v2 compared, and implemented from v2.** Both versions
+number the result **Proposition 3** (§2.2), but they state it differently.
+
+- **v1, "Minimum Abstention Lower Bound":**
+  abstention ≥ (μ−α)/(1−α) − O(√(log(1/δ)/n)). The loss is in [0, 1], and the constant
+  inside O(·) is not given.
+- **v2, "Sharpened two-sided abstention floor":** let μ = E[R] and M = ess sup R ≤ 1,
+  with α < M. Any selective predictor with E[R | emit] ≤ α has
+  P(abstain) ≥ (μ−α)/(M−α) ≥ (μ−α)/(1−α).
+  - It is exact at the population level.
+  - For finite samples it gives a plug-in correction ε/(M−α), with
+    ε = √(log(2/δ)/(2n)).
+- **Relationship:** v1 is v2 with M = 1. For our 0/1 loss, M = 1 whenever any error
+  occurs, so the two agree.
+- **Rounding:** v2 also fixes rounding in the worked examples. CoNLL 72B, for example,
+  is "≥16%" in v1 and "≥15.6%" in v2.
+
+[feasibility.py](../src/ask_or_act/metrics/feasibility.py) cites v2, Proposition 3, and
+is tested against v2's own worked numbers.
+
+**Caveats**
+- The proposition statements were read verbatim from the HTML of both versions. The
+  proof (v2 Appendix E.4) was only seen as a summary.
+- The direction of the ε correction is our reading, as a high-probability lower
+  confidence bound on μ. **TODO (blocker for M3b):** re-read E.4 in the full PDF before relying on the
+  conservative floor.
 
 ### 2c. Background: the original conformal risk control paper
 
@@ -102,10 +125,35 @@ fixed-sequence testing in Trust or Escalate fits into.
 - Many apparent calibration advantages shrink or reverse once accuracy is controlled.
 - It proposes an evaluation with three accuracy-controlled views.
 
-**What we take**
-- Report accuracy-controlled calibration alongside raw ECE/Brier whenever we compare
-  confidence signals or deciders. The exact three views are to be read from the paper in
-  M2.
+**Details** (read in full, v2, for M2). Title: *When Calibration Rankings Reverse:
+Accuracy-Controlled Evaluation for Fair Comparison of LLMs* (EMNLP 2026). The three views
+are defined in §4:
+- **DA, distribution-aligned (§4.2).** Importance-weight the higher-accuracy model's
+  examples to the lower accuracy:
+  - weight a_low/a_high on its right answers;
+  - weight (1−a_low)/(1−a_high) on its wrong ones;
+  - then compute weighted ECE and Brier.
+- **IA, instance-aligned (§4.1).** Keep only the examples where both models are right
+  or both are wrong.
+- **CA, candidate-aligned (§4.3).** Each model scores the pooled candidate answers.
+
+Recommendations (§6):
+- Use DA as the default.
+- Use IA "as a corroborating check".
+- Treat CA "as a diagnostic tool".
+
+Other details:
+- CIs come from 2,000 paired bootstrap resamples (Appendix E.6).
+- Kish ESS/N below 0.5 is flagged (Appendix E.5).
+- The paper does not state the bin count or binning scheme.
+
+**What we take** (implemented in [ace.py](../src/ask_or_act/metrics/ace.py)):
+- All of the above, reported whenever `ask-or-act metrics` compares two runs.
+- A *reversal* flag, raised when the raw gap and an aligned gap have opposite signs,
+  with its bootstrap stability.
+- Our choices where the paper is silent:
+  - equal-width bins, the same as the rest of the report;
+  - in CA, a candidate chosen by both models counts once.
 
 ### 3b. Other signal comparisons found during the literature check
 
@@ -214,6 +262,15 @@ Li et al., 2026. [arXiv:2601.07206](https://arxiv.org/abs/2601.07206). Findings 
   Datasets & Benchmarks. [arXiv:2306.05685](https://arxiv.org/abs/2306.05685)
   - Documents position, verbosity and self-enhancement bias.
   - Source of the MT-Bench human judgments dataset.
+  - **Agreement (§4.1, v4):** the probability that two random individuals, "but not
+    identical", agree on a random question.
+  - **Tie setups (Table 5):** S1 keeps ties, and counts position-inconsistent LLM
+    verdicts as ties. S2 uses non-tie votes only.
+  - **Published human–human agreement (Table 5):** 63% / 81% (turn 1) and 67% / 82%
+    (turn 2), for S1 / S2.
+  - **Our replication** on the 500-vote test half, after converting labels to model
+    names: 0.606 [0.533, 0.682] / 0.815 [0.740, 0.882]. Both CIs contain the published
+    values. Comparing raw display-order labels instead gives 0.409 / 0.498, near chance.
 - **Large Language Models are not Fair Evaluators.** Wang et al., 2023.
   [arXiv:2305.17926](https://arxiv.org/abs/2305.17926)
   - Answer order changes verdicts.

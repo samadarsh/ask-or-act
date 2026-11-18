@@ -43,7 +43,23 @@ uv run mypy                 # strict type check of src/ and tests/
 uv sync --all-extras        # + optional `data` deps (huggingface-hub, pyarrow)
 uv run ask-or-act run configs/fake-banking77.toml --dry-run   # plan + cost, no calls
 uv run ask-or-act run configs/fake-banking77.toml             # run, cache, save to runs/
+uv run ask-or-act metrics runs/<id>                # metrics table + runs/<id>/metrics.json
+uv run ask-or-act metrics runs/<a> runs/<b>        # paired comparison (+ ACE views)
 ```
+
+Metrics (milestone 2): `metrics/` holds pure functions over saved runs. A run stores
+`decisions.jsonl` plus `examples.jsonl` (gold labels and metadata, never input text).
+
+- **Errors** count as wrong, with confidence 0.
+- **CIs:** seeded bootstrap with 2,000 resamples. MT-Bench is resampled by question.
+- **Paired tests:** exact McNemar for accuracy, a centered paired bootstrap for the
+  other metrics, and Holm correction across the metric family.
+- **Paper-backed pieces:** ACE (arXiv 2606.30814 v2) and the Kotte v2 Proposition 3
+  feasibility floor.
+- **Known behaviour:** ECE is biased upward on finite samples, about 0.03 for a
+  perfectly calibrated decider with 770 examples. Percentile CIs for ECE are therefore
+  skewed. Compare deciders paired on the same sample; don't read single ECE values as
+  absolute.
 
 Architecture (milestone 1):
 
@@ -149,6 +165,11 @@ All four must pass before a change is done.
   fraction of the time.
 - A distribution-shift warning. The guarantees assume calibration data and test data are
   exchangeable, so warn when that looks violated.
+
+- **TODO (blocker for M3b):** re-check the Kotte finite-sample correction
+  (`min_abstention_conservative` in `metrics/feasibility.py`) against the full v2 PDF,
+  Appendix E.4, before any guaranteed-threshold code uses it. Only the population floor
+  is verified so far.
 
 **CI gate and decision changelog (M6)**
 - Inspired by Self-Improvement Memory (arXiv 2611.18856). Every run appends an entry

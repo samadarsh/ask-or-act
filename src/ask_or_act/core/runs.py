@@ -18,12 +18,39 @@ import platform
 import secrets
 import subprocess
 import tempfile
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
-from ask_or_act.core.types import JSON, Decision
+from ask_or_act.core.types import JSON, Decision, Example
+
+
+@dataclass(frozen=True)
+class GoldRecord:
+    """What metrics need to know about an example: everything except its input text."""
+
+    id: str
+    gold: str
+    options: tuple[str, ...]
+    meta: Mapping[str, JSON] = field(default_factory=dict)
+
+    @classmethod
+    def of(cls, ex: Example) -> "GoldRecord":
+        return cls(ex.id, ex.gold, ex.options, ex.meta)
+
+    def to_json(self) -> dict[str, JSON]:
+        return {
+            "id": self.id,
+            "gold": self.gold,
+            "options": list(self.options),
+            "meta": dict(self.meta),
+        }
+
+    @classmethod
+    def from_json(cls, data: Mapping[str, Any]) -> "GoldRecord":
+        return cls(data["id"], data["gold"], tuple(data["options"]), data.get("meta", {}))
 
 
 @dataclass(frozen=True)
@@ -31,6 +58,7 @@ class RunRecord:
     path: Path
     metadata: dict[str, JSON]
     decisions: list[Decision]
+    examples: list[GoldRecord]  # same order as decisions
 
 
 def git_info(cwd: Path | None = None) -> dict[str, JSON]:
@@ -65,17 +93,37 @@ def make_run_id(name: str, started_at: datetime) -> str:
     return f"{started_at.strftime('%Y%m%dT%H%M%SZ')}-{name}-{secrets.token_hex(3)}"
 
 
+def _write_jsonl(path: Path, rows: Iterable[Mapping[str, JSON]]) -> None:
+    with path.open("w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    with path.open(encoding="utf-8") as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
 def save_run(
-    runs_dir: Path, run_id: str, metadata: Mapping[str, JSON], decisions: Sequence[Decision]
+    runs_dir: Path,
+    run_id: str,
+    metadata: Mapping[str, JSON],
+    decisions: Sequence[Decision],
+    examples: Sequence[Example | GoldRecord],
 ) -> Path:
+    """``examples`` are stored as GoldRecords (id, gold, options, meta), never inputs."""
+    if [d.example_id for d in decisions] != [e.id for e in examples]:
+        raise ValueError("decisions and examples must be aligned by id")
     runs_dir.mkdir(parents=True, exist_ok=True)
     final = runs_dir / run_id
     if final.exists():
         raise FileExistsError(final)
     tmp = Path(tempfile.mkdtemp(prefix=f".{run_id}.", dir=runs_dir))
-    with (tmp / "decisions.jsonl").open("w", encoding="utf-8") as f:
-        for d in decisions:
-            f.write(json.dumps(d.to_json(), ensure_ascii=False) + "\n")
+    _write_jsonl(tmp / "decisions.jsonl", (d.to_json() for d in decisions))
+    _write_jsonl(
+        tmp / "examples.jsonl",
+        ((e if isinstance(e, GoldRecord) else GoldRecord.of(e)).to_json() for e in examples),
+    )
     (tmp / "run.json").write_text(
         json.dumps({"run_id": run_id, **metadata}, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
@@ -86,6 +134,6 @@ def save_run(
 
 def load_run(path: Path) -> RunRecord:
     metadata = json.loads((path / "run.json").read_text(encoding="utf-8"))
-    with (path / "decisions.jsonl").open(encoding="utf-8") as f:
-        decisions = [Decision.from_json(json.loads(line)) for line in f if line.strip()]
-    return RunRecord(path, metadata, decisions)
+    decisions = [Decision.from_json(r) for r in _read_jsonl(path / "decisions.jsonl")]
+    examples = [GoldRecord.from_json(r) for r in _read_jsonl(path / "examples.jsonl")]
+    return RunRecord(path, metadata, decisions, examples)

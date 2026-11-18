@@ -128,7 +128,9 @@ def run_from_config(
         },
         "wall_time_s": outcome.wall_time_s,
     }
-    run_dir = save_run(cfg.runs_dir, make_run_id(cfg.name, started), metadata, outcome.decisions)
+    run_dir = save_run(
+        cfg.runs_dir, make_run_id(cfg.name, started), metadata, outcome.decisions, examples
+    )
 
     ok = [d for d in outcome.decisions if d.ok]
     correct = sum(d.choice == ex.gold for d, ex in zip(outcome.decisions, examples, strict=True))

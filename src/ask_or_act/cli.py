@@ -44,7 +44,39 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--dry-run", action="store_true", help="show plan and cost; call nothing")
     run.add_argument("--yes", action="store_true", help="approve a run with nonzero cost")
     run.add_argument("--raw-dir", type=Path, default=DEFAULT_RAW_DIR)
+
+    met = sub.add_parser("metrics", help="metrics for a run, or a paired comparison of two")
+    met.add_argument("runs", nargs="+", type=Path, help="runs/<id> [runs/<id2>]")
+    met.add_argument("--bins", type=int, default=15, help="calibration bins (default 15)")
+    met.add_argument("--n-boot", type=int, default=2000, help="bootstrap resamples")
+    met.add_argument("--seed", type=int, default=0, help="bootstrap seed")
+    met.add_argument(
+        "--alpha",
+        type=float,
+        nargs="+",
+        default=[0.01, 0.05, 0.1, 0.2],
+        help="risk targets for the abstention feasibility check",
+    )
+    met.add_argument("--out", type=Path, help="JSON output path")
     return parser
+
+
+def _run_metrics(args: argparse.Namespace) -> int:
+    from ask_or_act.metrics.command import run_metrics
+    from ask_or_act.metrics.report import Settings
+
+    if len(args.runs) > 2:
+        print("error: give one run, or two runs to compare", file=sys.stderr)
+        return 2
+    settings = Settings(
+        n_bins=args.bins, n_boot=args.n_boot, seed=args.seed, alphas=tuple(args.alpha)
+    )
+    try:
+        run_metrics(args.runs, settings, out_path=args.out)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    return 0
 
 
 def _run_run(args: argparse.Namespace) -> int:
@@ -97,5 +129,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_data(args)
     if args.command == "run":
         return _run_run(args)
+    if args.command == "metrics":
+        return _run_metrics(args)
     parser.print_help()
     return 0

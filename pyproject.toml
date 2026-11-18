@@ -6,7 +6,9 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "numpy>=2.0",  # vectorized metrics + bootstrap resampling
+]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
@@ -34,6 +36,9 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
+# RUF001-003 flag "ambiguous" Unicode. We use α, μ, −, × deliberately in docstrings
+# that state formulas from papers, so they stay readable next to the source.
+ignore = ["RUF001", "RUF002", "RUF003"]
 select = [
     "E", "W",   # pycodestyle
     "F",        # pyflakes (unused imports, undefined names)
@@ -54,7 +59,8 @@ python_version = "3.12"
 files = ["src", "tests"]
 
 [[tool.mypy.overrides]]
-module = ["pyarrow", "pyarrow.*"]  # ships no type hints
+module = ["pyarrow", "pyarrow.*", "sklearn", "sklearn.*", "scipy", "scipy.*"]
+# These ship no type hints. sklearn and scipy are test-only (reference implementations).
 ignore_missing_imports = true
 
 # ---------------------------------------------------------------- pytest
@@ -68,4 +74,6 @@ dev = [
     "pytest>=9.2.0",
     "pytest-cov>=7.1.0",
     "ruff>=0.17.5",
+    "scikit-learn>=1.9.1",
+    "scipy>=1.18.1",
 ]
