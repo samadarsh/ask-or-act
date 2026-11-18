@@ -24,7 +24,8 @@ jobs:
           enable-cache: true
 
       # --locked fails if uv.lock is out of date with pyproject.toml.
-      - run: uv sync --locked
+      # --all-extras: type-check and import the optional `data` code too.
+      - run: uv sync --locked --all-extras
 
       - name: Lint
         run: uv run ruff check
