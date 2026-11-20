@@ -1,0 +1,27 @@
+# Free baseline: always the most common training label (aegis).
+name = "majority-aegis"
+
+[dataset]
+manifest = "data/samples/aegis.json"
+split = "test"
+
+[decider]
+type = "majority"
+model = "majority-train"
+prompt_version = "none"
+
+[decider.params]
+
+[execution]
+max_concurrency = 8
+timeout_s = 120
+max_retries = 3
+
+[budget]
+max_usd = 0.0
+
+[cache]
+path = ".cache/decisions.sqlite"
+
+[output]
+runs_dir = "runs"

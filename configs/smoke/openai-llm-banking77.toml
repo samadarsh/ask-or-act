@@ -1,0 +1,37 @@
+# SMOKE TEST: 20 examples, PAID API. Always run with --dry-run first.
+name = "smoke-openai-llm-banking77"
+
+[dataset]
+manifest = "data/samples/banking77.json"
+split = "test"
+limit = 20                # smoke test: seeded subset of the test half
+
+[decider]
+type = "openai"
+model = "gpt-6-luna"
+prompt_version = "v1"
+
+[decider.params]
+confidence_signal = "verbalized"
+temperature = 0.0
+logprobs = 20
+samples = 5
+sample_temperature = 1.0
+reasoning_effort = "none"
+max_output_tokens = 256
+expected_output_tokens = 40
+
+[execution]
+max_concurrency = 4
+requests_per_minute = 60
+timeout_s = 120
+max_retries = 3
+
+[budget]
+max_usd = 0.1
+
+[cache]
+path = ".cache/decisions.sqlite"
+
+[output]
+runs_dir = "runs"

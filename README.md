@@ -61,7 +61,16 @@ uv run ask-or-act run configs/fake-banking77.toml --dry-run   # plan + cost esti
 uv run ask-or-act run configs/fake-banking77.toml             # saved under runs/
 uv run ask-or-act metrics runs/<run-id>                       # metrics with 95% CIs
 uv run ask-or-act metrics runs/<run-a> runs/<run-b>           # paired comparison
+
+# Free baselines, then a real provider (keys in .env, never committed):
+uv run ask-or-act run configs/baselines/classic-banking77.toml
+uv run --env-file .env ask-or-act run configs/smoke/groq-gpt-oss-120b-banking77.toml --dry-run
+uv run --env-file .env ask-or-act run configs/smoke/groq-gpt-oss-120b-banking77.toml --yes
 ```
+
+Deciders, signals, prices and free-tier limits are described in
+[docs/deciders.md](docs/deciders.md). On a free tier, a run that hits the daily limit
+stops cleanly. Re-running it later resumes from the cache.
 
 CI runs all of these on Python 3.12, 3.13 and 3.14.
 

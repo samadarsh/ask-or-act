@@ -74,7 +74,27 @@ Architecture (milestone 1):
 - `run.py`: the `run` command.
 
 A new provider is one class that satisfies `Decider`, plus one line in
-`deciders/__init__.py`. Bump `prompt_version` whenever a prompt changes, or the cache
+`deciders/__init__.py`.
+
+Deciders (milestone 3): see `docs/deciders.md`.
+
+- **API keys:** read only from the environment. Run paid configs with
+  `uv run --env-file .env ask-or-act run <config> --dry-run` first, then `--yes`.
+- **Available keys (2026-11-20):** only `GROQ_API_KEY`, on the free tier. Never call the
+  Gemini or OpenAI adapters unless the user adds those keys. Keep them tested with
+  fixtures.
+- **Free-tier calls still need approval.** State the requests and tokens against the
+  daily limits (dry run) and wait for a go-ahead, as for paid calls. `--yes` is required
+  whenever the list price is above $0.
+- **Groq:**
+  - Daily limits stop a run cleanly: exit code 5, status `quota_stopped`. Re-running the
+    same config later resumes from the cache.
+  - Groq has no logprobs, so token_logprob and verbalized_logprob are unsupported there.
+  - `cost_usd` is the published paid price; `charged_usd` is 0 on the free tier.
+- **Never print, log or echo key values.** To check that a key is present, test the
+  variable name only.
+- **New model:** add a dated, cited price entry to `deciders/pricing.py`.
+- **Prompt edits:** bump `PROMPT_VERSION` in `deciders/prompts.py`. Bump `prompt_version` whenever a prompt changes, or the cache
 will serve stale answers.
 
 CI (`.github/workflows/ci.yml`) runs lint, format check, mypy and pytest on 3.12–3.14.

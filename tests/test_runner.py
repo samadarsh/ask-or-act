@@ -96,7 +96,7 @@ def test_failed_calls_are_charged_their_estimate() -> None:
     assert failed.charged_usd == pytest.approx(0.01)  # half of the 2-example estimate
     assert failed.cost_usd == 0
     assert ok.charged_usd == ok.cost_usd == pytest.approx(0.004)
-    assert out.charged_usd == pytest.approx(sum(d.charged_usd for d in out.decisions))
+    assert out.charged_usd == pytest.approx(sum(d.charged_usd or 0.0 for d in out.decisions))
 
 
 def test_timeouts_are_retried_then_reported() -> None:
@@ -168,7 +168,7 @@ def test_stops_mid_run_when_actual_cost_outruns_estimate() -> None:
     out = asyncio.run(runner.run(make_examples(10)))
     assert out.budget_stopped
     assert out.charged_usd <= 0.20 + 0.05  # can overshoot by at most one call's surprise
-    assert sum(d.charged_usd for d in out.decisions) == pytest.approx(out.charged_usd)
+    assert sum(d.charged_usd or 0.0 for d in out.decisions) == pytest.approx(out.charged_usd)
     skipped = [d for d in out.decisions if d.error and d.error.startswith("skipped:")]
     assert len(skipped) == 10 - len(decider.calls)
     assert all(d.attempts == 0 for d in skipped)

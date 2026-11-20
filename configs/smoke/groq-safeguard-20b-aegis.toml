@@ -1,0 +1,48 @@
+# SMOKE TEST: 20 Aegis examples on Groq's FREE tier ($0 charged; list price recorded).
+# CONTENT WARNING: Aegis prompts can be unsafe. Saved runs keep IDs and model outputs
+# only (no input text, reasoning text dropped); runs/ is gitignored.
+# gpt-oss-safeguard-20b is a policy-following safety classifier: the policy (our
+# instructions) goes in the system message, the prompt to classify in the user message.
+# Its free tier is tight (3 RPM, 2K TPM), so k = 3 samples and slow pacing.
+name = "smoke-groq-safeguard-20b-aegis"
+
+[dataset]
+manifest = "data/samples/aegis.json"
+split = "test"
+limit = 20
+
+[decider]
+type = "groq"
+model = "openai/gpt-oss-safeguard-20b"
+prompt_version = "v1"
+
+[decider.params]
+tier = "free"
+confidence_signal = "verbalized"
+system_prompt = true
+temperature = 0.0
+samples = 3
+sample_temperature = 1.0
+sample_variation = "none"
+reasoning_effort = "low"
+max_output_tokens = 1024
+expected_output_tokens = 250
+
+[execution]
+max_concurrency = 1
+requests_per_minute = 2.5    # free tier: 3 RPM
+tokens_per_minute = 1800     # free tier: 2K TPM
+requests_per_day = 1000
+tokens_per_day = 200000
+timeout_s = 600              # one example = 4 calls, paced at 3/min
+max_retries = 6
+backoff_max_s = 60
+
+[budget]
+max_usd = 0.0
+
+[cache]
+path = ".cache/decisions.sqlite"
+
+[output]
+runs_dir = "runs"

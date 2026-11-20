@@ -18,7 +18,7 @@ from ask_or_act.core.types import Decision, Example
 def test_save_and_load_round_trip(tmp_path: Path) -> None:
     decisions = [Decision("a", "x", 0.9, cost_usd=0.1), Decision.failed("b", "boom")]
     examples = [
-        Example("a", "SECRET INPUT", ("x", "y"), "x", {"judge": "j1"}),
+        Example("a", "SECRET INPUT", ("x", "y"), "x", meta={"judge": "j1"}),
         Example("b", "SECRET INPUT", ("x", "y"), "y"),
     ]
     path = save_run(tmp_path, "run-1", {"name": "t", "seed": 7}, decisions, examples)

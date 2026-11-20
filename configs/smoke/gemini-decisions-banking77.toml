@@ -1,0 +1,30 @@
+# SMOKE TEST: 20 examples, PAID API. Always run with --dry-run first.
+name = "smoke-gemini-decisions-banking77"
+
+[dataset]
+manifest = "data/samples/banking77.json"
+split = "test"
+limit = 20                # smoke test: seeded subset of the test half
+
+[decider]
+type = "gemini_decisions"
+model = "gemini-decision-1"
+prompt_version = "v1"
+
+[decider.params]
+other_option = true
+
+[execution]
+max_concurrency = 4
+requests_per_minute = 60
+timeout_s = 120
+max_retries = 3
+
+[budget]
+max_usd = 0.05
+
+[cache]
+path = ".cache/decisions.sqlite"
+
+[output]
+runs_dir = "runs"

@@ -46,14 +46,27 @@ class RateLimiter:
         self._last = now
 
     async def acquire(self, amount: float = 1.0) -> None:
-        # A request bigger than the bucket would wait forever; let it through when the
-        # bucket is full instead.
-        amount = min(amount, self._capacity)
+        """Wait until ``amount`` tokens are available, then take them.
+
+        A request bigger than the bucket (e.g. 6 HTTP calls when the bucket holds 1, or
+        a 6,000-token prompt against an 8,000/min limit, whose bucket holds 133) would
+        wait forever. It goes through once the bucket is full, and the bucket goes *into
+        debt*: later callers wait until the debt is paid off, so the long-run rate still
+        holds. (Clamping the amount instead would silently undercount big requests.)
+        """
+        need = min(amount, self._capacity)
         async with self._lock:
             self._refill()
-            while self._tokens < amount:
-                await self._sleep((amount - self._tokens) / self._rate)
+            while self._tokens < need:
+                await self._sleep((need - self._tokens) / self._rate)
                 self._refill()
+            self._tokens -= amount
+
+    def charge(self, amount: float) -> None:
+        """Take ``amount`` more tokens without waiting, e.g. when a call used more tokens
+        than estimated. Later ``acquire`` calls wait it off."""
+        if amount > 0:
+            self._refill()
             self._tokens -= amount
 
 

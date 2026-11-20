@@ -1,0 +1,30 @@
+# Free baseline: answer-length features + logistic regression, Platt-calibrated (mt_bench).
+name = "classic-mt_bench"
+
+[dataset]
+manifest = "data/samples/mt_bench.json"
+split = "test"
+
+[decider]
+type = "classic"
+model = "length-logreg-v1"
+prompt_version = "none"
+
+[decider.params]
+C = 4.0
+cv = 5
+seed = 0
+
+[execution]
+max_concurrency = 1
+timeout_s = 120
+max_retries = 3
+
+[budget]
+max_usd = 0.0
+
+[cache]
+path = ".cache/decisions.sqlite"
+
+[output]
+runs_dir = "runs"

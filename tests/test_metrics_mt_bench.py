@@ -19,7 +19,7 @@ def vote(
         "comparison": comparison,
         "question_id": question,
     }
-    return Example(f"human:{i}", "x", OPTIONS, winner, meta)
+    return Example(f"human:{i}", "x", OPTIONS, winner, meta=meta)
 
 
 def test_to_model_name() -> None:

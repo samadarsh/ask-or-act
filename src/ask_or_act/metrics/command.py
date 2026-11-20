@@ -27,13 +27,19 @@ def run_metrics(
     settings: Settings,
     *,
     out_path: Path | None = None,
+    signal: str | None = None,
     out: Callable[[str], None] = print,
 ) -> Path:
     if not 1 <= len(runs) <= 2:
         raise ValueError("give one run (report) or two runs (paired comparison)")
-    scored = [from_run(load_run(p)) for p in runs]
+    scored = [from_run(load_run(p), signal) for p in runs]
     reports = [single_report(s, settings) for s in scored]
     for path, report in zip(runs, reports, strict=True):
+        if report["n_signal_fallback"]:
+            out(
+                f"note: {report['n_signal_fallback']} decision(s) lack signal {signal!r}; "
+                "they keep their own confidence"
+            )
         out(render_single(report, path.name))
         out("")
     result: dict[str, object] = {"runs": [str(p) for p in runs]}

@@ -100,6 +100,11 @@ AEGIS = Source(
 
 AEGIS_LABELS = frozenset({"safe", "unsafe"})
 
+# Training splits, used only by the free baselines (classic, majority). Same pinned
+# revisions as the evaluation samples.
+BANKING77_TRAIN = Source(BANKING77.repo, BANKING77.revision, ("data/train-00000-of-00001.parquet",))
+AEGIS_TRAIN = Source(AEGIS.repo, AEGIS.revision, ("train.json",))  # 22.7 MB
+
 
 def aegis_candidates(rows_by_file: Mapping[str, Sequence[Row]]) -> list[Candidate]:
     """Prompt-safety candidates.

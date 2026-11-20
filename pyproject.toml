@@ -21,6 +21,12 @@ classifiers = [
 ask-or-act = "ask_or_act.cli:main"
 
 [project.optional-dependencies]
+providers = [
+    "httpx>=0.28",  # async HTTP for the Gemini/OpenAI adapters; MockTransport for tests
+]
+classic = [
+    "scikit-learn>=1.9",  # TF-IDF + logistic regression; needs method="temperature"
+]
 data = [
     "huggingface-hub>=2.4.0",
     "pyarrow>=26.0.1",

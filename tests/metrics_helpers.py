@@ -38,5 +38,7 @@ def sample_examples(name: str, split: Split = Split.TEST) -> list[Example]:
     m = manifest.read(SAMPLES / f"{name}.json")
     options = tuple(sorted({e.label for e in m.examples}))
     return [
-        Example(e.id, e.id, options, e.label, dict(e.meta)) for e in m.examples if e.split == split
+        Example(e.id, e.id, options, e.label, meta=dict(e.meta))
+        for e in m.examples
+        if e.split == split
     ]

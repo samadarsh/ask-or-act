@@ -1,0 +1,45 @@
+# SMOKE TEST: 20 examples on Groq's FREE tier ($0 charged; list price recorded).
+# Uses the daily free quota. Always run with --dry-run first.
+# Self-consistency samples also vary the prompt (shuffled options + reworded
+# instructions), to exercise the prompt-variation fallback.
+name = "smoke-groq-qwen3.8-27b-banking77"
+
+[dataset]
+manifest = "data/samples/banking77.json"
+split = "test"
+limit = 20
+
+[decider]
+type = "groq"
+model = "qwen/qwen3.8-27b"
+prompt_version = "v1"
+
+[decider.params]
+tier = "free"
+confidence_signal = "verbalized"
+temperature = 0.0
+samples = 5
+sample_temperature = 1.0
+sample_variation = "shuffle+paraphrase"
+reasoning_effort = "none"    # Qwen: disables reasoning
+max_output_tokens = 256
+expected_output_tokens = 30
+
+[execution]
+max_concurrency = 2
+requests_per_minute = 25     # free tier: 30 RPM
+tokens_per_minute = 7000     # free tier: 8K TPM
+requests_per_day = 1000
+tokens_per_day = 200000
+timeout_s = 180
+max_retries = 6
+backoff_max_s = 60
+
+[budget]
+max_usd = 0.0
+
+[cache]
+path = ".cache/decisions.sqlite"
+
+[output]
+runs_dir = "runs"

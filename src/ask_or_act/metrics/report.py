@@ -146,6 +146,8 @@ def single_report(s: Scored, settings: Settings = Settings()) -> dict[str, Any]:
         "dataset": s.dataset,
         "n": n,
         "n_errors": s.n_errors,
+        "signal": s.signal or "confidence",
+        "n_signal_fallback": s.n_signal_fallback,
         "n_unique_confidences": n_unique(s.confidence),
         "settings": asdict(settings),
         "metrics": metrics,
@@ -350,6 +352,7 @@ def _metric_rows(metrics: Mapping[str, Any], floors: Mapping[str, Any], level: f
 def render_single(r: Mapping[str, Any], title: str) -> str:
     lines = [
         f"{title}  ({r['dataset']}, n={r['n']}, errors={r['n_errors']}, "
+        f"confidence = {r.get('signal', 'confidence')}, "
         f"unique confidences={r['n_unique_confidences']})",
         "",
     ]

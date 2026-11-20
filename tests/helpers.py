@@ -5,7 +5,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
 from ask_or_act.core.decider import CostEstimate
-from ask_or_act.core.types import DeciderConfig, Decision, Example
+from ask_or_act.core.types import DeciderConfig, Decision, Example, PublicExample
 from ask_or_act.deciders.fake import FakeDecider
 
 
@@ -56,6 +56,7 @@ class ScriptedDecider:
         self.actual_usd = actual_usd
         self.wrong_ids = wrong_ids
         self.calls: list[list[str]] = []
+        self.saw_gold = False
         self.in_flight = 0
         self.max_in_flight = 0
 
@@ -67,11 +68,16 @@ class ScriptedDecider:
     def max_batch_size(self) -> int:
         return self._batch_size
 
-    def estimate(self, examples: Sequence[Example]) -> CostEstimate:
+    @property
+    def needs_gold(self) -> bool:
+        return False  # like a real decider: the runner must hand it PublicExample
+
+    def estimate(self, examples: Sequence[PublicExample]) -> CostEstimate:
         return CostEstimate(1, 10 * len(examples), len(examples), self.estimate_usd * len(examples))
 
-    async def decide_batch(self, examples: Sequence[Example]) -> list[Decision]:
+    async def decide_batch(self, examples: Sequence[PublicExample]) -> list[Decision]:
         self.calls.append([ex.id for ex in examples])
+        self.saw_gold = self.saw_gold or any(hasattr(ex, "gold") for ex in examples)
         self.in_flight += 1
         self.max_in_flight = max(self.max_in_flight, self.in_flight)
         try:

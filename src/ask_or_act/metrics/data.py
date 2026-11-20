@@ -46,6 +46,8 @@ class Scored:
     meta: tuple[Mapping[str, JSON], ...]
     dataset: str
     n_errors: int
+    signal: str | None = None  # which Decision.signals entry is used as confidence
+    n_signal_fallback: int = 0  # answered decisions lacking that signal (kept their own)
 
     def __len__(self) -> int:
         return len(self.ids)
@@ -65,10 +67,15 @@ class Scored:
             meta=tuple(self.meta[i] for i in pick),
             dataset=self.dataset,
             n_errors=sum(self.pred[i] == ERROR_LABEL for i in pick),
+            signal=self.signal,
+            n_signal_fallback=self.n_signal_fallback,
         )
 
 
-def from_run(record: RunRecord) -> Scored:
+def from_run(record: RunRecord, signal: str | None = None) -> Scored:
+    """``signal``: score a recorded confidence signal (e.g. "verbalized_logprob") instead
+    of ``Decision.confidence``. Answered decisions without that signal keep their own
+    confidence and are counted in ``n_signal_fallback``, which reports show."""
     if [d.example_id for d in record.decisions] != [e.id for e in record.examples]:
         raise ValueError(f"{record.path}: decisions and examples are not aligned")
     dataset_info = record.metadata.get("dataset")
@@ -78,10 +85,17 @@ def from_run(record: RunRecord) -> Scored:
         d.choice if d.ok and d.choice is not None else ERROR_LABEL for d in record.decisions
     )
     gold = tuple(e.gold for e in record.examples)
-    confidence = np.array(
-        [d.confidence if d.ok and d.confidence is not None else 0.0 for d in record.decisions],
-        dtype=np.float64,
-    )
+    fallback = 0
+    conf_values = []
+    for d in record.decisions:
+        c = d.confidence if d.ok and d.confidence is not None else 0.0
+        if signal is not None and d.ok:
+            if signal in d.signals:
+                c = float(d.signals[signal])
+            else:
+                fallback += 1
+        conf_values.append(c)
+    confidence = np.array(conf_values, dtype=np.float64)
     options = tuple(sorted({o for e in record.examples for o in e.options}))
     groups = tuple(
         f"q{e.meta['question_id']}" if dataset == "mt_bench" and "question_id" in e.meta else e.id
@@ -99,6 +113,8 @@ def from_run(record: RunRecord) -> Scored:
         meta=tuple(e.meta for e in record.examples),
         dataset=dataset,
         n_errors=sum(p == ERROR_LABEL for p in pred),
+        signal=signal,
+        n_signal_fallback=fallback,
     )
 
 

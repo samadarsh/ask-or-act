@@ -25,27 +25,41 @@ def sha256_hex(value: Any) -> str:
 
 
 @dataclass(frozen=True)
-class Example:
-    """One item to decide on.
+class PublicExample:
+    """What a real decider is allowed to see: everything except the gold label.
 
     ``input`` is whatever the task needs: a string for Banking77/Aegis, a dict holding
-    two conversations for MT-Bench. ``options`` is the closed set of allowed answers,
-    and ``gold`` is the reference answer (never shown to real deciders).
+    two conversations for MT-Bench. ``options`` is the closed set of allowed answers.
+
+    The runner hands real deciders *this* type. There is no ``gold`` attribute to read,
+    so a decider that tries fails at runtime, and mypy rejects it before it ever runs.
     """
 
     id: str
     input: JSON
     options: tuple[str, ...]
-    gold: str
-    meta: Mapping[str, JSON] = field(default_factory=dict)
+    meta: Mapping[str, JSON] = field(default_factory=dict, kw_only=True)
 
     def __post_init__(self) -> None:
         if len(self.options) < 2:
             raise ValueError(f"example {self.id}: need at least 2 options")
         if len(set(self.options)) != len(self.options):
             raise ValueError(f"example {self.id}: duplicate options")
+
+
+@dataclass(frozen=True)
+class Example(PublicExample):
+    """An example plus its gold (reference) label. Only metrics and fakes see this."""
+
+    gold: str
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
         if self.gold not in self.options:
             raise ValueError(f"example {self.id}: gold {self.gold!r} not in options")
+
+    def public(self) -> PublicExample:
+        return PublicExample(self.id, self.input, self.options, meta=self.meta)
 
 
 @dataclass(frozen=True)
@@ -78,7 +92,7 @@ class Decision:
     input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: float = 0.0
-    charged_usd: float = 0.0
+    charged_usd: float | None = None  # None: "same as cost_usd" (set by the runner)
     latency_s: float = 0.0
     attempts: int = 1
     cached: bool = False

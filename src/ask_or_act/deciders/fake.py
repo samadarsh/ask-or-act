@@ -28,7 +28,7 @@ from collections.abc import Sequence
 from enum import StrEnum
 
 from ask_or_act.core.decider import CostEstimate, Pricing, rough_token_count
-from ask_or_act.core.types import JSON, DeciderConfig, Decision, Example
+from ask_or_act.core.types import JSON, DeciderConfig, Decision, Example, PublicExample
 
 
 class FakeKind(StrEnum):
@@ -100,15 +100,24 @@ class FakeDecider:
     def max_batch_size(self) -> int:
         return self._max_batch
 
-    def estimate(self, examples: Sequence[Example]) -> CostEstimate:
+    @property
+    def needs_gold(self) -> bool:
+        return True  # simulates a known accuracy, so it must know the answer
+
+    def estimate(self, examples: Sequence[PublicExample]) -> CostEstimate:
         tokens_in = sum(rough_token_count(ex) for ex in examples)
         tokens_out = len(examples)
         return CostEstimate(1, tokens_in, tokens_out, self.pricing.cost(tokens_in, tokens_out))
 
-    async def decide_batch(self, examples: Sequence[Example]) -> list[Decision]:
+    async def decide_batch(self, examples: Sequence[PublicExample]) -> list[Decision]:
         if self.latency_s:
             await asyncio.sleep(self.latency_s)
-        return [self._decide(ex) for ex in examples]
+        out = []
+        for ex in examples:
+            if not isinstance(ex, Example):
+                raise TypeError("fake deciders need gold labels (needs_gold=True)")
+            out.append(self._decide(ex))
+        return out
 
     # ------------------------------------------------------------------ internals
 

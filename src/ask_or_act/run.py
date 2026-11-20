@@ -5,17 +5,25 @@ Safety order. Nothing is called until all of these pass:
 1. The config parses, and the sample matches its committed manifest fingerprints.
 2. The plan (dry run) shows how many calls are uncached and what they will cost.
 3. The estimate fits within ``[budget] max_usd``.
-4. If the estimate is above $0, ``--yes`` was passed. This is the "tell me the cost
+4. If the estimate is above $0 at list price, ``--yes`` was passed. Free-tier calls
+   count too. This is the "tell me the cost
    first" rule enforced in code.
+
+**Daily quotas (free tiers).** If the provider says a per-day limit is used up, the run
+stops cleanly and exits with ``EXIT_QUOTA``. The run is saved with
+``status = "quota_stopped"``. Every finished decision is already in the cache, so
+re-running the same config after the reset makes only the missing calls.
 """
 
 import asyncio
 import hashlib
+import os
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from ask_or_act.core.budget import BudgetExceededError
 from ask_or_act.core.cache import DecisionCache
@@ -24,11 +32,12 @@ from ask_or_act.core.runner import Runner, RunOutcome, RunPlan
 from ask_or_act.core.runs import environment_info, git_info, make_run_id, save_run
 from ask_or_act.core.types import JSON, sha256_hex
 from ask_or_act.data import manifest as manifest_io
-from ask_or_act.deciders import build_decider
+from ask_or_act.deciders import DeciderContext, build_decider
 
 EXIT_OK = 0
 EXIT_BUDGET = 3
 EXIT_NEEDS_APPROVAL = 4
+EXIT_QUOTA = 5
 
 
 @dataclass(frozen=True)
@@ -39,14 +48,42 @@ class RunResult:
     run_dir: Path | None = None
 
 
-def _describe_plan(cfg: RunConfig, plan: RunPlan) -> str:
+def _describe_plan(cfg: RunConfig, plan: RunPlan, refresh: bool) -> str:
+    from ask_or_act.deciders.pricing import PRICES
+
     e = plan.estimate
-    return (
-        f"plan: {plan.n_examples} examples, {plan.n_cached} cached, "
-        f"{e.calls} call(s) to make\n"
+    lines = [
+        f"plan: {plan.n_examples} examples, {plan.n_cached} cached"
+        f"{' (cache bypassed: --refresh)' if refresh else ''}, {e.calls} API call(s) to make",
         f"estimate: ~{e.input_tokens:,} input + ~{e.output_tokens:,} output tokens "
-        f"= ${e.usd:.4f} (budget ${cfg.budget_usd:.4f})"
-    )
+        f"= ${e.usd:.4f} charged (budget ${cfg.budget_usd:.4f})",
+    ]
+    if e.list_usd is not None and abs(e.list_usd - e.usd) > 1e-12:
+        lines.append(
+            f"at the published paid price: ${e.list_usd:.4f} "
+            f"(${1000 * e.list_usd / max(1, plan.n_examples - plan.n_cached):.4f} "
+            "per 1,000 decisions)"
+        )
+    if cfg.decider.model in PRICES:
+        lines.append(f"price: {PRICES[cfg.decider.model].describe()}")
+    x = cfg.execution
+    tokens = e.input_tokens + e.output_tokens
+    for used, limit, what in (
+        (e.calls, x.requests_per_day, "requests"),
+        (tokens, x.tokens_per_day, "tokens"),
+    ):
+        if limit:
+            days = used / limit
+            lines.append(
+                f"daily quota: ~{used:,} {what} of {limit:,}/day ({100 * days:.0f}%)"
+                + (
+                    f"; needs ~{days:.1f} days. The run will stop at the limit and "
+                    "resume from the cache when re-run"
+                    if days > 1
+                    else ""
+                )
+            )
+    return "\n".join(lines)
 
 
 def run_from_config(
@@ -55,27 +92,47 @@ def run_from_config(
     raw_dir: Path,
     dry_run: bool = False,
     approve_spend: bool = False,
+    refresh: bool = False,
     out: Callable[[str], None] = print,
+    transport: Any = None,
 ) -> RunResult:
     from ask_or_act.data.examples import load_examples  # needs the `data` extra
 
     cfg = load_config(config_path)
     manifest = manifest_io.read(cfg.dataset.manifest)
     examples = load_examples(manifest, raw_dir, cfg.dataset.split, cfg.dataset.limit)
-    decider = build_decider(cfg.decider)
     cache = DecisionCache(cfg.cache_path) if cfg.cache_path else None
+    # API keys are read from the environment at call time (never here, never logged).
+    context = DeciderContext(
+        dataset=manifest.name,
+        raw_dir=raw_dir,
+        env=os.environ,
+        sample_cache=cache,
+        refresh=refresh,
+        transport=transport,
+    )
+    decider = build_decider(cfg.decider, context)
     try:
-        runner = Runner(decider, execution=cfg.execution, cache=cache, budget_usd=cfg.budget_usd)
+        runner = Runner(
+            decider,
+            execution=cfg.execution,
+            cache=cache,
+            budget_usd=cfg.budget_usd,
+            refresh=refresh,
+        )
         plan = runner.plan(examples)
-        out(_describe_plan(cfg, plan))
+        out(_describe_plan(cfg, plan, refresh))
         if dry_run:
             out("dry run: nothing was called")
             return RunResult(EXIT_OK, plan)
         if plan.estimate.usd > cfg.budget_usd + 1e-9:
             out("refusing: the estimate exceeds the budget; nothing was called")
             return RunResult(EXIT_BUDGET, plan)
-        if plan.estimate.usd > 0 and not approve_spend:
-            out("this run costs money: re-run with --yes to approve the estimate above")
+        # Free-tier calls cost $0 but still use the provider (and its daily quota), so
+        # anything with a list price needs approval too.
+        if plan.estimate.at_list_price > 0 and not approve_spend:
+            what = "costs money" if plan.estimate.usd > 0 else "calls a provider API (free tier)"
+            out(f"this run {what}: re-run with --yes to approve the plan above")
             return RunResult(EXIT_NEEDS_APPROVAL, plan)
 
         started = datetime.now(UTC)
@@ -89,9 +146,16 @@ def run_from_config(
         if cache is not None:
             cache.close()
 
+    status = (
+        "quota_stopped"
+        if outcome.quota_stopped
+        else "budget_stopped"
+        if outcome.budget_stopped
+        else "completed"
+    )
     metadata: dict[str, JSON] = {
         "name": cfg.name,
-        "status": "budget_stopped" if outcome.budget_stopped else "completed",
+        "status": status,
         "started_at": started.isoformat(),
         "finished_at": finished.isoformat(),
         "git": git_info(),
@@ -107,10 +171,11 @@ def run_from_config(
             "n_examples": len(examples),
             "example_ids_sha256": sha256_hex([ex.id for ex in examples]),
         },
-        "decider": cfg.decider.to_json(),
+        "decider": decider.config.to_json(),  # resolved defaults included
         "seeds": {"manifest": manifest.seed, "decider": cfg.decider.params.get("seed")},
         "cost": {
             "estimated_usd": plan.estimate.usd,
+            "estimated_list_usd": plan.estimate.at_list_price,
             # What this run paid; 0 for cache hits.
             "charged_usd": outcome.charged_usd,
             # True cost of every decision, cached included (per-decision cost_usd).
@@ -123,9 +188,14 @@ def run_from_config(
         "counts": {
             "examples": len(examples),
             "cached": plan.n_cached,
+            "refresh": refresh,
             "calls": plan.estimate.calls,
             "errors": outcome.n_errors,
+            "skipped": outcome.n_skipped,
         },
+        "quota": None
+        if outcome.quota_stopped is None
+        else {"message": outcome.quota_stopped, "retry_after_s": outcome.quota_retry_after_s},
         "wall_time_s": outcome.wall_time_s,
     }
     run_dir = save_run(
@@ -141,11 +211,21 @@ def run_from_config(
         f"{outcome.wall_time_s:.2f}s"
     )
     out(
-        f"accuracy (sanity check only; real metrics arrive in milestone 2): "
+        f"accuracy (quick check; full report: ask-or-act metrics <run>): "
         f"{correct / len(examples):.3f}"
     )
     if outcome.n_errors:
         first = next(d for d in outcome.decisions if not d.ok)
         print(f"first error: {first.example_id}: {first.error}", file=sys.stderr)
     out(f"saved run: {run_dir}")
+    if outcome.quota_stopped:
+        wait = outcome.quota_retry_after_s
+        out(
+            f"STOPPED: daily limit reached ({outcome.quota_stopped}). "
+            f"{outcome.n_skipped} example(s) were not run"
+            + (f"; the provider says retry in ~{wait / 3600:.1f} h" if wait else "")
+            + f". Re-run `ask-or-act run {config_path} --yes` after the reset: decisions "
+            "already made come from the cache, so nothing is repeated."
+        )
+        return RunResult(EXIT_QUOTA, plan, outcome, run_dir)
     return RunResult(EXIT_OK, plan, outcome, run_dir)

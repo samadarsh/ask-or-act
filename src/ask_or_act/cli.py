@@ -43,6 +43,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("config", type=Path, help="run config file (TOML)")
     run.add_argument("--dry-run", action="store_true", help="show plan and cost; call nothing")
     run.add_argument("--yes", action="store_true", help="approve a run with nonzero cost")
+    run.add_argument(
+        "--refresh",
+        action="store_true",
+        help="ignore cached decisions (re-call the API); still stores new ones",
+    )
     run.add_argument("--raw-dir", type=Path, default=DEFAULT_RAW_DIR)
 
     met = sub.add_parser("metrics", help="metrics for a run, or a paired comparison of two")
@@ -58,6 +63,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="risk targets for the abstention feasibility check",
     )
     met.add_argument("--out", type=Path, help="JSON output path")
+    met.add_argument(
+        "--signal",
+        help="score this recorded signal as the confidence, e.g. "
+        "verbalized, token_logprob, verbalized_logprob, self_consistency, native",
+    )
     return parser
 
 
@@ -72,7 +82,7 @@ def _run_metrics(args: argparse.Namespace) -> int:
         n_bins=args.bins, n_boot=args.n_boot, seed=args.seed, alphas=tuple(args.alpha)
     )
     try:
-        run_metrics(args.runs, settings, out_path=args.out)
+        run_metrics(args.runs, settings, out_path=args.out, signal=args.signal)
     except (FileNotFoundError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -85,7 +95,11 @@ def _run_run(args: argparse.Namespace) -> int:
 
     try:
         return run_from_config(
-            args.config, raw_dir=args.raw_dir, dry_run=args.dry_run, approve_spend=args.yes
+            args.config,
+            raw_dir=args.raw_dir,
+            dry_run=args.dry_run,
+            approve_spend=args.yes,
+            refresh=args.refresh,
         ).exit_code
     except (ConfigError, manifest.ManifestError, FileNotFoundError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)

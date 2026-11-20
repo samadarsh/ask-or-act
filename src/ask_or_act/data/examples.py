@@ -49,7 +49,7 @@ def _example(
             "conversation_a": row["conversation_a"],
             "conversation_b": row["conversation_b"],
         }
-        return Example(entry.id, payload, MT_BENCH_OPTIONS, entry.label, meta)
+        return Example(entry.id, payload, MT_BENCH_OPTIONS, entry.label, meta=meta)
     if name == "aegis":
         # Unsafe text lives only in memory; runs and caches store ids and decisions only.
         return Example(entry.id, str(row["prompt"]), AEGIS_OPTIONS, entry.label)

@@ -114,10 +114,14 @@ def parse_config(data: dict[str, Any]) -> RunConfig:
     number = (int, float)
     rpm: float | None = ex.get("requests_per_minute", number, None)
     tpm: float | None = ex.get("tokens_per_minute", number, None)
+    rpd: int | None = ex.get("requests_per_day", int, None)
+    tpd: int | None = ex.get("tokens_per_day", int, None)
     execution = ExecutionConfig(
         max_concurrency=ex.get("max_concurrency", int, 4),
         requests_per_minute=None if rpm is None else float(rpm),
         tokens_per_minute=None if tpm is None else float(tpm),
+        requests_per_day=rpd,
+        tokens_per_day=tpd,
         timeout_s=float(ex.get("timeout_s", number, 60.0)),
         retry=RetryPolicy(
             max_retries=ex.get("max_retries", int, 3),

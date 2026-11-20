@@ -37,7 +37,7 @@ def test_put_get_round_trip_and_persistence(tmp_path: Path) -> None:
         cache.put(CFG, EX, d)
     with DecisionCache(path) as reopened:  # a new process would see the same
         hit = reopened.get(CFG, replace(EX, id="e9"))
-        assert hit == replace(d, example_id="e9", cached=True)
+        assert hit == replace(d, example_id="e9", cached=True, charged_usd=0.0)
         assert len(reopened) == 1
 
 

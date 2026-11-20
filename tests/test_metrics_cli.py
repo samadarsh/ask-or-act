@@ -52,3 +52,24 @@ def test_too_many_runs(tmp_path: Path) -> None:
 
 def test_missing_run(tmp_path: Path) -> None:
     assert main(["metrics", str(tmp_path / "nope")]) == 2
+
+
+def test_signal_option_scores_a_recorded_signal(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from dataclasses import replace
+
+    from ask_or_act.core.runs import load_run, save_run
+
+    run = make_run(tmp_path, "r", "calibrated")
+    rec = load_run(run)
+    # Give half the decisions an extra signal that is always 1.0 (maximally overconfident).
+    decisions = [
+        replace(d, signals={**d.signals, "verbalized": 1.0}) if i % 2 else d
+        for i, d in enumerate(rec.decisions)
+    ]
+    run2 = save_run(tmp_path, "r2", rec.metadata, decisions, rec.examples)
+    assert main(["metrics", str(run2), "--n-boot", "50", "--signal", "verbalized"]) == 0
+    out = capsys.readouterr().out
+    assert "confidence = verbalized" in out
+    assert "100 decision(s) lack signal 'verbalized'" in out

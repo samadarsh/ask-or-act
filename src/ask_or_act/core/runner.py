@@ -16,6 +16,9 @@ What happens to each run:
 
    A batch that still fails becomes error decisions, so one bad call doesn't lose the
    whole run.
+   - stops the run cleanly on ``QuotaExhaustedError`` (e.g. a free tier's daily
+     request limit). Batches not yet started are skipped without calling. They are
+     never cached, so re-running the same config later makes exactly those calls.
 4. **Cache** each successful decision as soon as it arrives. A crash halfway through
    loses nothing that was already paid for.
 """
@@ -27,9 +30,9 @@ from dataclasses import dataclass, field, replace
 
 from ask_or_act.core.budget import BudgetExceededError, BudgetGuard
 from ask_or_act.core.cache import DecisionCache
-from ask_or_act.core.decider import CostEstimate, Decider, RetryableError
+from ask_or_act.core.decider import CostEstimate, Decider, QuotaExhaustedError, RetryableError
 from ask_or_act.core.limits import Clock, RateLimiter, RetryPolicy, Sleep
-from ask_or_act.core.types import Decision, Example
+from ask_or_act.core.types import Decision, Example, PublicExample
 
 
 @dataclass(frozen=True)
@@ -37,6 +40,11 @@ class ExecutionConfig:
     max_concurrency: int = 4
     requests_per_minute: float | None = None
     tokens_per_minute: float | None = None
+    # Daily quotas (e.g. a free tier). Used for the plan's warning only: the provider
+    # enforces them, and the runner stops cleanly on its "per day" 429. Requests are
+    # HTTP calls (self-consistency samples count).
+    requests_per_day: int | None = None
+    tokens_per_day: int | None = None
     timeout_s: float = 60.0
     retry: RetryPolicy = field(default_factory=RetryPolicy)
 
@@ -63,6 +71,17 @@ class RunOutcome:
     n_errors: int
     budget_stopped: bool  # True if some batches were skipped to stay within budget
     wall_time_s: float
+    # Set when a daily/long-window quota stopped the run: the provider's message.
+    quota_stopped: str | None = None
+    quota_retry_after_s: float | None = None
+
+    @property
+    def n_skipped(self) -> int:
+        return sum(bool(d.error and d.error.startswith(SKIPPED_PREFIXES)) for d in self.decisions)
+
+
+QUOTA_SKIP = "skipped (daily limit): "
+SKIPPED_PREFIXES = ("skipped:", QUOTA_SKIP)
 
 
 class Runner:
@@ -73,6 +92,7 @@ class Runner:
         execution: ExecutionConfig = ExecutionConfig(),
         cache: DecisionCache | None = None,
         budget_usd: float | None = None,
+        refresh: bool = False,
         clock: Clock = time.monotonic,
         sleep: Sleep = asyncio.sleep,
     ) -> None:
@@ -82,13 +102,15 @@ class Runner:
         self.execution = execution
         self.cache = cache
         self.budget_usd = budget_usd
+        self.refresh = refresh  # True: ignore cached decisions (still store new ones)
         self._clock = clock
         self._sleep = sleep
+        self._quota: QuotaExhaustedError | None = None
 
     # ------------------------------------------------------------------ planning
 
     def _cached(self, examples: Sequence[Example]) -> dict[str, Decision]:
-        if self.cache is None:
+        if self.cache is None or self.refresh:
             return {}
         hits = {}
         for ex in examples:
@@ -113,6 +135,7 @@ class Runner:
 
     async def run(self, examples: Sequence[Example]) -> RunOutcome:
         start = self._clock()
+        self._quota = None
         plan = self.plan(examples)
         guard = BudgetGuard(self.budget_usd)
         if self.budget_usd is not None and plan.estimate.usd > self.budget_usd + 1e-9:
@@ -152,7 +175,17 @@ class Runner:
             n_errors=sum(not d.ok for d in decisions),
             budget_stopped=any(d.error and d.error.startswith("skipped:") for d in decisions),
             wall_time_s=self._clock() - start,
+            quota_stopped=None if self._quota is None else str(self._quota),
+            quota_retry_after_s=None if self._quota is None else self._quota.retry_after_s,
         )
+
+    def _quota_skip(self, batch: Sequence[Example], attempts: int = 0) -> list[Decision]:
+        assert self._quota is not None
+        model = self.decider.config.model
+        return [
+            Decision.failed(ex.id, f"{QUOTA_SKIP}{self._quota}", model=model, attempts=attempts)
+            for ex in batch
+        ]
 
     async def _run_batch(
         self,
@@ -162,6 +195,8 @@ class Runner:
         tpm: RateLimiter | None,
     ) -> list[Decision]:
         model = self.decider.config.model
+        if self._quota is not None:
+            return self._quota_skip(batch)
         estimate = self.decider.estimate(batch)
         try:
             guard.reserve(estimate.usd)
@@ -176,17 +211,32 @@ class Runner:
         for attempt in range(retry.max_retries + 1):
             attempts = attempt + 1
             if rpm:
-                await rpm.acquire()
+                await rpm.acquire(estimate.calls)  # a decider may make several HTTP calls
             if tpm:
                 await tpm.acquire(estimate.input_tokens + estimate.output_tokens)
+            if self._quota is not None:  # hit by another batch while this one waited
+                guard.settle(estimate.usd, 0.0)
+                return self._quota_skip(batch, attempts - 1)
             t0 = self._clock()
+            # Real deciders get PublicExample (no gold label); only fakes see gold.
+            visible: list[PublicExample] = (
+                list(batch) if self.decider.needs_gold else [ex.public() for ex in batch]
+            )
             try:
                 async with asyncio.timeout(self.execution.timeout_s):
-                    out = await self.decider.decide_batch(batch)
+                    out = await self.decider.decide_batch(visible)
+            except QuotaExhaustedError as exc:
+                # Stop the run. Part of a multi-call batch may already have been billed
+                # (and its samples cached), so the reservation is kept, as for failures.
+                self._quota = exc
+                guard.settle(estimate.usd, estimate.usd)
+                return self._quota_skip(batch, attempts)
             except (RetryableError, TimeoutError) as exc:
                 error = f"{type(exc).__name__}: {exc}"
                 if attempt < retry.max_retries:
-                    await self._sleep(retry.backoff(attempt, batch[0].id))
+                    wait = retry.backoff(attempt, batch[0].id)
+                    hint = exc.retry_after_s if isinstance(exc, RetryableError) else None
+                    await self._sleep(max(wait, hint or 0.0))
                 continue
             except Exception as exc:  # permanent: don't retry, but don't crash the run
                 error = f"{type(exc).__name__}: {exc}"
@@ -196,17 +246,20 @@ class Runner:
                 error = "decider returned decisions that don't match the batch"
                 break
             latency = self._clock() - t0
+            if tpm:  # pay for tokens beyond the estimate (e.g. long reasoning)
+                used = sum(d.input_tokens + d.output_tokens for d in out if not d.cached)
+                tpm.charge(used - (estimate.input_tokens + estimate.output_tokens))
             out = [
                 replace(
                     d,
                     latency_s=d.latency_s or latency,
                     attempts=attempts,
-                    charged_usd=d.cost_usd,
+                    charged_usd=d.cost_usd if d.charged_usd is None else d.charged_usd,
                     cached=False,
                 )
                 for d in out
             ]
-            guard.settle(estimate.usd, sum(d.charged_usd for d in out))
+            guard.settle(estimate.usd, sum(d.charged_usd or 0.0 for d in out))
             if self.cache is not None:
                 for ex, d in zip(batch, out, strict=True):
                     self.cache.put(self.decider.config, ex, d)

@@ -19,20 +19,26 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
 
-from ask_or_act.core.types import DeciderConfig, Decision, Example, sha256_hex
+from ask_or_act.core.types import JSON, DeciderConfig, Decision, PublicExample, sha256_hex
 
 CACHE_SCHEMA = 1
 
 
-def cache_key(config: DeciderConfig, example: Example) -> str:
-    return sha256_hex(
-        {
-            "schema": CACHE_SCHEMA,
-            "decider": config.to_json(),
-            "input": example.input,
-            "options": list(example.options),
-        }
-    )
+def cache_key(
+    config: DeciderConfig, example: PublicExample, extra: dict[str, JSON] | None = None
+) -> str:
+    """``extra`` distinguishes several calls for one example, e.g. self-consistency
+    samples: ``{"sample_index": 3, "temperature": 1.0}``. Without it, k samples of the
+    same input would share one key and come back identical."""
+    key: dict[str, JSON] = {
+        "schema": CACHE_SCHEMA,
+        "decider": config.to_json(),
+        "input": example.input,
+        "options": list(example.options),
+    }
+    if extra:
+        key["extra"] = extra
+    return sha256_hex(key)
 
 
 class DecisionCache:
@@ -46,9 +52,11 @@ class DecisionCache:
         )
         self._db.commit()
 
-    def get(self, config: DeciderConfig, example: Example) -> Decision | None:
+    def get(
+        self, config: DeciderConfig, example: PublicExample, extra: dict[str, JSON] | None = None
+    ) -> Decision | None:
         row = self._db.execute(
-            "SELECT decision FROM decisions WHERE key = ?", (cache_key(config, example),)
+            "SELECT decision FROM decisions WHERE key = ?", (cache_key(config, example, extra),)
         ).fetchone()
         if row is None:
             return None
@@ -56,13 +64,19 @@ class DecisionCache:
         # Keep the original cost_usd (true cost); this run pays nothing for it.
         return replace(stored, example_id=example.id, cached=True, charged_usd=0.0)
 
-    def put(self, config: DeciderConfig, example: Example, decision: Decision) -> None:
+    def put(
+        self,
+        config: DeciderConfig,
+        example: PublicExample,
+        decision: Decision,
+        extra: dict[str, JSON] | None = None,
+    ) -> None:
         if not decision.ok:
             return
         self._db.execute(
             "INSERT OR REPLACE INTO decisions VALUES (?, ?, ?)",
             (
-                cache_key(config, example),
+                cache_key(config, example, extra),
                 json.dumps(decision.to_json()),
                 datetime.now(UTC).isoformat(),
             ),

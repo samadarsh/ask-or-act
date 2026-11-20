@@ -125,7 +125,14 @@ def test_run_end_to_end_then_fully_cached(
     assert all(d.ok and not d.cached for d in record.decisions)
     meta = record.metadata
     assert meta["status"] == "completed"
-    assert meta["counts"] == {"examples": 6, "cached": 0, "calls": 6, "errors": 0}
+    assert meta["counts"] == {
+        "examples": 6,
+        "cached": 0,
+        "refresh": False,
+        "calls": 6,
+        "errors": 0,
+        "skipped": 0,
+    }
     for key in (
         "git",
         "environment",
@@ -145,10 +152,17 @@ def test_run_end_to_end_then_fully_cached(
     # Second run: everything comes from the cache, zero calls.
     capsys.readouterr()
     assert main(["run", str(cfg)]) == 0
-    assert "6 cached, 0 call(s)" in capsys.readouterr().out
+    assert "6 cached, 0 API call(s)" in capsys.readouterr().out
     (run2,) = set(runs(tmp_path)) - {run1}  # same-second ids don't sort by start time
     rec2 = load_run(run2)
-    assert rec2.metadata["counts"] == {"examples": 6, "cached": 6, "calls": 0, "errors": 0}
+    assert rec2.metadata["counts"] == {
+        "examples": 6,
+        "cached": 6,
+        "refresh": False,
+        "calls": 0,
+        "errors": 0,
+        "skipped": 0,
+    }
     assert [d.choice for d in rec2.decisions] == [d.choice for d in record.decisions]
     assert all(d.cached for d in rec2.decisions)
 
