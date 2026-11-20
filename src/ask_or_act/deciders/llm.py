@@ -52,18 +52,26 @@ API facts used (docs and SDK types read 2026-11-18):
 """
 
 import asyncio
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Protocol
 
-from ask_or_act.core.decider import CostEstimate
+from ask_or_act.core.decider import CostEstimate, QuotaExhaustedError, RetryableError
 from ask_or_act.core.types import JSON, DeciderConfig, Decision, PublicExample
 from ask_or_act.deciders import DeciderContext
-from ask_or_act.deciders.http import ProviderError, api_key, post_json_full
+from ask_or_act.deciders.http import (
+    InvalidOutputError,
+    ProviderError,
+    api_key,
+    post_json_full,
+    public_message,
+)
 from ask_or_act.deciders.pricing import Price, price_for
 from ask_or_act.deciders.prompts import (
     OTHER,
     PROMPT_VERSION,
+    SENSITIVE_TASKS,
     VARIATIONS,
     answer_schema,
     build_prompt,
@@ -103,6 +111,9 @@ class CallSpec:
     reasoning_effort: str | None = None  # OpenAI, Groq
     thinking_budget: int | None = None  # Gemini (0 disables thinking where supported)
     system: str | None = None  # system message / instructions, if the prompt is split
+    response_format: str = (
+        "auto"  # chat providers: auto | strict | json_schema | json_object | none
+    )
 
 
 class Provider(Protocol):
@@ -111,6 +122,10 @@ class Provider(Protocol):
     supports_logprobs: bool
     default_tier: str  # "paid" or "free"
     record_headers: tuple[str, ...]  # response-header prefixes to keep in raw
+
+    def schema_in_prompt(self, model: str) -> bool:
+        """Whether the JSON schema is billed as input (for the cost estimate)."""
+        ...
 
     def request(self, spec: CallSpec, key: str) -> tuple[str, dict[str, str], dict[str, Any]]:
         """(url, headers, body)."""
@@ -131,6 +146,9 @@ class OpenAILLM:
     supports_logprobs = True
     default_tier = "paid"
     record_headers: tuple[str, ...] = ()
+
+    def schema_in_prompt(self, model: str) -> bool:
+        return False  # not measured yet
 
     def request(self, spec: CallSpec, key: str) -> tuple[str, dict[str, str], dict[str, Any]]:
         body: dict[str, Any] = {
@@ -204,6 +222,9 @@ class GeminiLLM:
     default_tier = "paid"
     record_headers: tuple[str, ...] = ()
 
+    def schema_in_prompt(self, model: str) -> bool:
+        return False  # not measured yet
+
     def request(self, spec: CallSpec, key: str) -> tuple[str, dict[str, str], dict[str, Any]]:
         config: dict[str, Any] = {
             "responseMimeType": "application/json",
@@ -274,6 +295,10 @@ class ChatModel:
     schema: str = "json_object"  # "strict" | "json_schema" (best effort) | "json_object"
     hide_reasoning: Mapping[str, Any] = field(default_factory=dict)  # body fields
     efforts: tuple[str, ...] = ()  # accepted reasoning_effort values; () = don't send
+    # The server writes the JSON schema into the prompt, so its size counts as input.
+    # Measured 2026-11-20: gpt-oss-120b used 1,061 input tokens where Qwen used 550 for
+    # the same Banking77 prompt; the difference is the schema (2,058 chars / 4 = 514).
+    schema_in_prompt: bool = False
 
 
 class ChatCompletionsLLM:
@@ -293,21 +318,27 @@ class ChatCompletionsLLM:
     def model(self, name: str) -> ChatModel:
         return self.models.get(name, ChatModel(schema="strict"))
 
+    def schema_in_prompt(self, model: str) -> bool:
+        return self.model(model).schema_in_prompt
+
     def request(self, spec: CallSpec, key: str) -> tuple[str, dict[str, str], dict[str, Any]]:
         caps = self.model(spec.model)
+        fmt = caps.schema if spec.response_format == "auto" else spec.response_format
         body: dict[str, Any] = {
             "model": spec.model,
             "messages": _messages(spec),
             "max_completion_tokens": spec.max_output_tokens,
         }
-        if caps.schema == "json_object":
+        if fmt == "none":
+            pass  # plain text; the prompt asks for JSON and parse_answer reads it
+        elif fmt == "json_object":
             body["response_format"] = {"type": "json_object"}
         else:
             body["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {
                     "name": "decision",
-                    "strict": caps.schema == "strict",
+                    "strict": fmt == "strict",
                     "schema": spec.schema,
                 },
             }
@@ -381,7 +412,10 @@ def _without_reasoning(response: dict[str, Any]) -> dict[str, Any]:
 
 
 _GPT_OSS = ChatModel(
-    schema="strict", hide_reasoning={"include_reasoning": False}, efforts=("low", "medium", "high")
+    schema="strict",
+    hide_reasoning={"include_reasoning": False},
+    efforts=("low", "medium", "high"),
+    schema_in_prompt=True,
 )
 
 
@@ -405,6 +439,7 @@ class GroqLLM(ChatCompletionsLLM):
             schema="json_schema",
             hide_reasoning={"include_reasoning": False},
             efforts=("low", "medium", "high"),
+            schema_in_prompt=True,
         ),
         # Qwen takes reasoning_format; gpt-oss rejects it. "none" disables reasoning.
         "qwen/qwen3.8-27b": ChatModel(
@@ -435,8 +470,11 @@ KNOWN_PARAMS = frozenset(
         "sample_variation",
         "system_prompt",
         "tier",
+        "response_format",
     }
 )
+
+RESPONSE_FORMATS = ("auto", "strict", "json_schema", "json_object", "none")
 
 
 def _opt_int(params: Mapping[str, JSON], key: str) -> int | None:
@@ -479,6 +517,11 @@ class PromptedLLMDecider:
         if self.variation not in VARIATIONS:
             raise ValueError(f"sample_variation must be one of {VARIATIONS}")
         self.system_prompt = bool(p.get("system_prompt", False))
+        self.response_format = str(p.get("response_format", "auto"))
+        if self.response_format not in RESPONSE_FORMATS:
+            raise ValueError(f"response_format must be one of {RESPONSE_FORMATS}")
+        if self.response_format != "auto" and not isinstance(provider, ChatCompletionsLLM):
+            raise ValueError("response_format can only be set for chat-completions providers")
         self.max_output_tokens = int(str(p.get("max_output_tokens", 512)))
         self.seed = _opt_int(p, "seed")
         effort = p.get("reasoning_effort")
@@ -502,6 +545,7 @@ class PromptedLLMDecider:
             "sample_temperature": self.sample_temperature,
             "sample_variation": self.variation,
             "system_prompt": self.system_prompt,
+            "response_format": self.response_format,
             "max_output_tokens": self.max_output_tokens,
             "seed": self.seed,
             "reasoning_effort": self.reasoning_effort,
@@ -527,17 +571,21 @@ class PromptedLLMDecider:
         return options_with_other(ex, self.other)
 
     def estimate(self, examples: Sequence[PublicExample]) -> CostEstimate:
-        """Input ≈ prompt chars / chars_per_token (calibrate from a smoke run's real
-        usage); output = expected_output_tokens per call. Self-consistency samples are
-        assumed uncached, so the estimate is conservative. On a free tier ``usd`` is 0
-        and ``list_usd`` is the same tokens at the published paid price."""
+        """Input ≈ (prompt chars, plus the JSON schema's chars where the server writes
+        it into the prompt) / chars_per_token; output = expected_output_tokens per call,
+        hidden reasoning included. Both were calibrated on the 2026-11-20 smoke runs
+        (see docs/deciders.md). Self-consistency samples are assumed uncached, so the
+        estimate is conservative. On a free tier ``usd`` is 0 and ``list_usd`` is the
+        same tokens at the published paid price."""
         calls = (1 + self.samples) * len(examples)
         tokens_in = 0
+        schema_too = self.provider.schema_in_prompt(self._config.model)
         for ex in examples:
-            sys_msg, user = build_prompt(
-                self.task, ex, self._options(ex), system=self.system_prompt
-            )
+            options = self._options(ex)
+            sys_msg, user = build_prompt(self.task, ex, options, system=self.system_prompt)
             chars = len(user) + len(sys_msg or "")
+            if schema_too and self.response_format not in ("json_object", "none"):
+                chars += len(json.dumps(answer_schema(options)))  # as measured
             tokens_in += (int(chars / self.chars_per_token) + 1) * (1 + self.samples)
         tokens_out = calls * self.expected_output_tokens
         list_usd = self.price.pricing.cost(tokens_in, tokens_out)
@@ -565,15 +613,45 @@ class PromptedLLMDecider:
             self.reasoning_effort,
             self.thinking_budget,
             system,
+            self.response_format,
         )
+
+    # Each HTTP call waits at ctx.gate (requests and tokens per minute), so the k+1
+    # calls of one example don't leave in a burst. The runner then skips its own
+    # per-batch pacing for this decider.
+    uses_call_gate = True
+
+    def _call_tokens(self, spec: CallSpec) -> int:
+        chars = len(spec.prompt) + len(spec.system or "")
+        if self.provider.schema_in_prompt(spec.model) and self.response_format not in (
+            "json_object",
+            "none",
+        ):
+            chars += len(json.dumps(spec.schema))
+        return int(chars / self.chars_per_token) + 1 + self.expected_output_tokens
 
     async def _call(self, spec: CallSpec) -> Completion:
         key = api_key(self.ctx.env, self.provider.key_env)
         url, headers, body = self.provider.request(spec, key)
-        response, resp_headers = await post_json_full(
-            url, body, headers=headers, transport=self.ctx.transport
-        )
-        completion = self.provider.parse(response)
+        gate = self.ctx.gate
+        expected = self._call_tokens(spec)
+        if gate is not None:
+            await gate(expected)
+        try:
+            response, resp_headers = await post_json_full(
+                url, body, headers=headers, transport=self.ctx.transport
+            )
+            completion = self.provider.parse(response)
+        except (ProviderError, RetryableError, QuotaExhaustedError) as exc:
+            if self.task in SENSITIVE_TASKS:
+                # Provider messages can quote model output (e.g. the invalid value in a
+                # schema-validation error), which can restate unsafe input. Same type,
+                # so retries and quota stops behave as before; only the text changes.
+                exc.args = (public_message(str(exc)),)
+                raise exc from None
+            raise
+        if gate is not None:
+            gate.charge(completion.input_tokens + completion.output_tokens - expected)
         if self.provider.record_headers:
             completion.raw["rate_limit"] = {
                 k: v
@@ -581,6 +659,44 @@ class PromptedLLMDecider:
                 if k.startswith(self.provider.record_headers)
             }
         return completion
+
+    def _generation(self, exc: InvalidOutputError) -> dict[str, JSON]:
+        """What to keep of a failed generation: its start for harmless tasks, only its
+        length where the input may be unsafe (it can be reasoning restating it)."""
+        if self.task in SENSITIVE_TASKS:
+            return {"failed_generation_chars": len(exc.generation)}
+        return {"failed_generation": exc.generation[:200]}
+
+    def _stored(self, raw: dict[str, Any], answer: str | None, confidence: int | None) -> JSON:
+        """The response as stored. On SENSITIVE_TASKS the message content is replaced by
+        the parsed answer and confidence, which is all any metric uses: content the
+        schema didn't constrain (prose, extra fields, an invalid "answer") could restate
+        unsafe input. Its length is kept for diagnosis."""
+        if self.task not in SENSITIVE_TASKS:
+            return raw
+        out = dict(raw)
+        choices = []
+        for c in raw.get("choices") or []:
+            msg = dict(c.get("message") or {})
+            text = str(msg.get("content") or "")
+            kept = {k: msg[k] for k in ("role", "reasoning_chars") if k in msg}
+            choices.append(
+                {
+                    **{k: v for k, v in c.items() if k in ("index", "finish_reason")},
+                    "message": {
+                        **kept,
+                        "content": json.dumps({"answer": answer, "confidence": confidence}),
+                        "content_chars": len(text),
+                    },
+                }
+            )
+        out["choices"] = choices
+        return out
+
+    def _invalid(self, answer: str | None) -> str:
+        if self.task in SENSITIVE_TASKS:
+            return f"invalid answer ({len(answer or '')} chars)"
+        return f"invalid answer {answer!r}"
 
     def _cost(self, c: Completion) -> tuple[float, float]:
         """(cost at the published price, what was charged: 0 on a free tier)."""
@@ -594,19 +710,34 @@ class PromptedLLMDecider:
     async def _decide(self, ex: PublicExample) -> Decision:
         options = self._options(ex)
         system, prompt = build_prompt(self.task, ex, options, system=self.system_prompt)
-        main = await self._call(
-            self._spec(
-                system,
-                prompt,
-                options,
-                temperature=self.temperature,
-                logprobs=self.logprobs,
-                seed=self.seed,
+        try:
+            main = await self._call(
+                self._spec(
+                    system,
+                    prompt,
+                    options,
+                    temperature=self.temperature,
+                    logprobs=self.logprobs,
+                    seed=self.seed,
+                )
             )
-        )
+        except InvalidOutputError as exc:
+            # The model failed the provider's JSON validation: an invalid answer, like
+            # unparseable text. No usage comes back with the error, so tokens are 0.
+            return Decision(
+                ex.id,
+                None,
+                None,
+                model=self._config.model,
+                raw={"main": {"error_code": exc.code, **self._generation(exc)}},
+                error=f"invalid output: {exc.code if self.task in SENSITIVE_TASKS else exc}",
+            )
         parsed = parse_answer(main.text)
+        valid = parsed.answer in options
         cost, charged = self._cost(main)
-        raw: dict[str, JSON] = {"main": main.raw}
+        raw: dict[str, JSON] = {
+            "main": self._stored(main.raw, parsed.answer if valid else None, parsed.confidence)
+        }
         if not self.provider.supports_logprobs:
             raw["unsupported_signals"] = list(LOGPROB_SIGNALS)
         if parsed.answer not in options:
@@ -620,7 +751,7 @@ class PromptedLLMDecider:
                 cost_usd=cost,
                 charged_usd=charged,
                 raw=raw,
-                error=f"invalid answer {parsed.answer!r}",
+                error=self._invalid(parsed.answer),
             )
 
         signals: dict[str, float] = {}
@@ -650,6 +781,7 @@ class PromptedLLMDecider:
                 {"answer": a, "cached": r.cached, "raw": dict(r.raw)}
                 for a, r in zip(answers, sample_records, strict=True)
             ]
+            raw["failed_samples"] = sum(r.error is not None for r in sample_records)
 
         confidence = signals.get(self.signal)
         if confidence is None:
@@ -712,19 +844,37 @@ class PromptedLLMDecider:
             system, prompt, order = sample_prompt(
                 self.task, ex, options, i, self.variation, system=self.system_prompt
             )
-            c = await self._call(
-                self._spec(
-                    system,
-                    prompt,
-                    order,
-                    temperature=self.sample_temperature,
-                    logprobs=0,
-                    seed=None,
+            try:
+                c = await self._call(
+                    self._spec(
+                        system,
+                        prompt,
+                        order,
+                        temperature=self.sample_temperature,
+                        logprobs=0,
+                        seed=None,
+                    )
                 )
-            )
-            ans = parse_answer(c.text).answer
+            except ProviderError as exc:
+                # A permanent failure of one sample (e.g. invalid JSON) counts as a
+                # sample that disagrees; it doesn't sink the example. Not cached, so a
+                # re-run tries it again. Rate limits and quota errors still propagate.
+                failed_raw: dict[str, JSON] = {"error": str(exc)[:300]}
+                if isinstance(exc, InvalidOutputError):
+                    failed_raw.update(self._generation(exc))
+                message = str(exc)
+                if isinstance(exc, InvalidOutputError) and self.task in SENSITIVE_TASKS:
+                    message = f"invalid output: {exc.code}"
+                failed_raw["error"] = message[:300]
+                return Decision(
+                    ex.id, None, None, model=self._config.model, raw=failed_raw, error=message
+                )
+            parsed = parse_answer(c.text)
+            ans = parsed.answer
             cost, charged = self._cost(c)
-            raw = dict(c.raw)
+            stored = self._stored(c.raw, ans if ans in options else None, parsed.confidence)
+            assert isinstance(stored, dict)
+            raw: dict[str, JSON] = dict(stored)
             if self.variation != "none":
                 raw["variation"] = (
                     {"options_order": list(order)} if "shuffle" in self.variation else {}
@@ -739,7 +889,7 @@ class PromptedLLMDecider:
                 cost_usd=cost,
                 charged_usd=charged,
                 raw=raw,
-                error=None if ans in options else f"invalid answer {ans!r}",
+                error=None if ans in options else self._invalid(ans),
             )
             if cache is not None:
                 cache.put(identity, ex, d, extra)

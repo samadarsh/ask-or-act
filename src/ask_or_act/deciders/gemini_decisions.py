@@ -20,12 +20,18 @@ import json
 from collections.abc import Sequence
 from typing import Any
 
-from ask_or_act.core.decider import CostEstimate
+from ask_or_act.core.decider import CostEstimate, QuotaExhaustedError, RetryableError
 from ask_or_act.core.types import JSON, DeciderConfig, Decision, PublicExample
 from ask_or_act.deciders import DeciderContext
-from ask_or_act.deciders.http import ProviderError, api_key, post_json
+from ask_or_act.deciders.http import ProviderError, api_key, post_json, public_message
 from ask_or_act.deciders.pricing import price_for
-from ask_or_act.deciders.prompts import OTHER, PROMPT_VERSION, instructions, render_input
+from ask_or_act.deciders.prompts import (
+    OTHER,
+    PROMPT_VERSION,
+    SENSITIVE_TASKS,
+    instructions,
+    render_input,
+)
 
 URL = "https://generativelanguage.googleapis.com/v1beta/decisions"
 KEY_ENV = "GEMINI_API_KEY"
@@ -103,13 +109,19 @@ class GeminiDecisionsDecider:
     async def decide_batch(self, examples: Sequence[PublicExample]) -> list[Decision]:
         (ex,) = examples
         key = api_key(self._ctx.env, KEY_ENV)
-        response = await post_json(
-            URL,
-            self.request_body(ex),
-            headers={"x-goog-api-key": key, "Content-Type": "application/json"},
-            transport=self._ctx.transport,
-        )
-        return [self.parse(ex, response)]
+        try:
+            response = await post_json(
+                URL,
+                self.request_body(ex),
+                headers={"x-goog-api-key": key, "Content-Type": "application/json"},
+                transport=self._ctx.transport,
+            )
+            return [self.parse(ex, response)]
+        except (ProviderError, RetryableError, QuotaExhaustedError) as exc:
+            if self.task in SENSITIVE_TASKS:  # see public_message
+                exc.args = (public_message(str(exc)),)
+                raise exc from None
+            raise
 
     def parse(self, ex: PublicExample, response: dict[str, Any]) -> Decision:
         block = (response.get("prompt_feedback") or {}).get("block_reason")

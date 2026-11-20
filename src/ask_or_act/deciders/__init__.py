@@ -18,6 +18,7 @@ from typing import Any
 
 from ask_or_act.core.cache import DecisionCache
 from ask_or_act.core.decider import Decider
+from ask_or_act.core.limits import CallGate
 from ask_or_act.core.types import DeciderConfig
 
 
@@ -36,6 +37,7 @@ class DeciderContext:
     sample_cache: DecisionCache | None = None
     refresh: bool = False
     transport: Any = None  # httpx.AsyncBaseTransport | None (httpx is optional)
+    gate: CallGate | None = None  # per-call pacing (see core/limits.py)
 
 
 Factory = Callable[[DeciderConfig, DeciderContext], Decider]

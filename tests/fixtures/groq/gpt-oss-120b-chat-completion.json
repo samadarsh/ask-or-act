@@ -1,0 +1,36 @@
+{
+ "id": "chatcmpl-gpt-oss-120b",
+ "object": "chat.completion",
+ "created": 1795162116,
+ "model": "openai/gpt-oss-120b",
+ "choices": [
+  {
+   "index": 0,
+   "message": {
+    "role": "assistant",
+    "content": "{\"answer\":\"edit_personal_details\",\"confidence\":96}"
+   },
+   "logprobs": null,
+   "finish_reason": "stop"
+  }
+ ],
+ "usage": {
+  "queue_time": 0.376510386,
+  "prompt_tokens": 1056,
+  "prompt_time": 0.137942708,
+  "completion_tokens": 42,
+  "completion_time": 0.090186612,
+  "total_tokens": 1098,
+  "total_time": 0.22812932,
+  "completion_tokens_details": {
+   "reasoning_tokens": 18
+  }
+ },
+ "usage_breakdown": null,
+ "system_fingerprint": "fp_19b184c447",
+ "x_groq": {
+  "id": "req_gpt-oss-120b",
+  "seed": 472557182
+ },
+ "service_tier": "on_demand"
+}

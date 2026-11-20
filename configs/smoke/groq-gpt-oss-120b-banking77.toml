@@ -23,7 +23,7 @@ sample_temperature = 1.0
 sample_variation = "none"
 reasoning_effort = "low"
 max_output_tokens = 1024     # reasoning tokens count here; too low truncates
-expected_output_tokens = 250 # estimate incl. hidden reasoning; calibrate after the run
+expected_output_tokens = 50  # measured 2026-11-20: mean 48 (24 reasoning), p90 65
 
 [execution]
 max_concurrency = 2

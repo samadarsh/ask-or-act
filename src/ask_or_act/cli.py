@@ -68,7 +68,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="score this recorded signal as the confidence, e.g. "
         "verbalized, token_logprob, verbalized_logprob, self_consistency, native",
     )
+    aud = sub.add_parser(
+        "audit-redaction",
+        help="fail if any Aegis prompt text appears in runs, caches or logs",
+    )
+    aud.add_argument(
+        "paths",
+        nargs="*",
+        type=Path,
+        help="files or directories to scan (default: runs/ and .cache/)",
+    )
+    aud.add_argument("--raw-dir", type=Path, default=DEFAULT_RAW_DIR)
+    aud.add_argument("--ngram", type=int, default=8, help="words per matched n-gram")
+    aud.add_argument(
+        "--min-words", type=int, default=5, help="skip prompts shorter than this many words"
+    )
     return parser
+
+
+def _run_audit(args: argparse.Namespace) -> int:
+    from ask_or_act.audit import DEFAULT_TARGETS, run_audit
+
+    return run_audit(
+        args.paths or list(DEFAULT_TARGETS),
+        args.raw_dir,
+        n=args.ngram,
+        min_words=args.min_words,
+    )
 
 
 def _run_metrics(args: argparse.Namespace) -> int:
@@ -145,5 +171,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_run(args)
     if args.command == "metrics":
         return _run_metrics(args)
+    if args.command == "audit-redaction":
+        return _run_audit(args)
     parser.print_help()
     return 0

@@ -16,6 +16,9 @@ OTHER = "other"  # "none of these" option; a plain key, since the Decisions API 
 # option keys alphabetically and warns against positional names like "none_of_the_above".
 
 TASKS = ("banking77", "aegis", "mt_bench")
+# Tasks whose inputs may be unsafe text. Model output that can restate the input
+# (reasoning, failed generations) is never stored for these; only its length is.
+SENSITIVE_TASKS = frozenset({"aegis"})
 
 
 def options_with_other(ex: PublicExample, other: bool) -> tuple[str, ...]:

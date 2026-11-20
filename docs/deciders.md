@@ -16,7 +16,7 @@ added.
 |---|---|---|---|---|
 | `majority` | most common training label | native (training frequency) | $0 | n/a |
 | `classic` | TF-IDF + logistic regression (MT-Bench: answer-length model), temperature-scaled | native (calibrated probabilities) | $0 | n/a |
-| `groq` | `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `qwen/qwen3.8-27b`, `openai/gpt-oss-safeguard-20b` | verbalized, self_consistency (temperature and/or prompt variation) | free tier ($0); list price recorded | ❌ pending smoke test |
+| `groq` | `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `qwen/qwen3.8-27b`, `openai/gpt-oss-safeguard-20b` | verbalized, self_consistency (temperature and/or prompt variation) | free tier ($0); list price recorded | ✅ 120b, qwen, safeguard (2026-11-20); 20b not yet |
 | `gemini_decisions` | `gemini-decision-1` | native per-option probabilities; `p_other` | paid | ❌ no key |
 | `gemini` | `gemini-3.5-flash-lite`, `gemini-3.8-flash` | verbalized, token_logprob*, verbalized_logprob*, self_consistency | paid | ❌ no key |
 | `openai` | `gpt-6-luna`, `gpt-6.1-terra`, `gpt-6.2-sol` | verbalized, token_logprob*, verbalized_logprob*, self_consistency | paid | ❌ no key |
@@ -63,6 +63,25 @@ Other request facts:
 - `max_completion_tokens` replaces `max_tokens`.
 - Reasoning text is never stored, only its length. It isn't needed, and on Aegis it
   could restate unsafe input.
+
+**Redaction on sensitive tasks (Aegis, `SENSITIVE_TASKS`).** Model output can restate
+unsafe input, so on these tasks nothing the model or provider wrote is kept verbatim:
+- **Error messages** keep only our own wording plus the provider's error code (e.g.
+  `HTTP 400 invalid_request_error [details removed: sensitive task]`). This matters
+  because provider messages quote output: a schema-validation error names the invalid
+  value.
+- **Stored responses:** the message content is replaced by the parsed
+  `{"answer", "confidence"}` (`null` answer when invalid), plus `content_chars`. Extra
+  fields, prose, refusals and reasoning are dropped.
+- **`failed_generation`:** only its length is kept.
+- **Regression test:** `tests/test_redaction.py` drives a full run through 15 failure
+  shapes whose bodies all carry a marker string, then checks that no saved file (run
+  files, SQLite cache) and nothing printed or logged contains it.
+- **Audit:** `uv run ask-or-act audit-redaction [paths]` indexes every Aegis prompt in
+  `data/raw` as 8-word n-grams and scans runs/, .cache/ (default) or given paths,
+  decoding JSON and SQLite values first. It prints ids and locations only, and exits 1
+  on a match. It catches copied input text, not paraphrases; the rules above handle
+  those.
 
 **Free-tier limits (rate-limits page; per model, per organization):**
 
@@ -176,25 +195,62 @@ cross-fitted calibration-half predictions score 0.490 accuracy and 0.076 ECE.
 - **Prices** live in [pricing.py](../src/ask_or_act/deciders/pricing.py): dated, cited,
   and flagged when unverified. A model without a price entry is refused.
 
-## Smoke-test plans (dry runs, 2026-11-20)
+## Smoke-test results (2026-11-20, 20 examples each, free tier)
 
-Proposed and awaiting approval:
+| run | decided | accuracy | ECE verbalized | ECE self-consistency | wall time |
+|---|---|---|---|---|---|
+| gpt-oss-120b, Banking77, k=5, temperature only | 20/20 | 0.80 | 0.16 | 0.17 | 19 min |
+| qwen3.8-27b, Banking77, k=5, shuffle+paraphrase (re-run) | 19/20 | 0.60 | 0.28 | 0.10 | 10 min |
+| gpt-oss-safeguard-20b, Aegis, k=3, temperature only | 18/20 | 0.75 | 0.13 | 0.13 | 57 min |
 
-| config | calls | est. tokens | charged | at list price | share of the model's daily quota | est. wall time |
-|---|---|---|---|---|---|---|
-| `groq-gpt-oss-120b-banking77` (k = 5, temperature only) | 120 | ~95K | $0 | $0.028 | 12% RPD, 48% TPD | ~14 min (TPM-bound) |
-| `groq-qwen3.8-27b-banking77` (k = 5, shuffle+paraphrase) | 120 | ~69K | $0 | $0.067 | 12% RPD, 34% TPD | ~10 min |
-| `groq-safeguard-20b-aegis` (k = 3) | 80 | ~44K | $0 | $0.008 | 8% RPD, 22% TPD | ~32 min (3 RPM) |
+These are sanity checks only: with n = 20, every interval is about ±0.2.
 
-**Estimate method.**
-- Input tokens are characters ÷ 4.
-- Output is `expected_output_tokens` per call, including hidden reasoning:
-  - 250 for gpt-oss at `reasoning_effort = "low"`;
-  - 30 for Qwen with reasoning off.
-- Self-consistency samples are assumed uncached.
+**Real tokens per call vs the old estimates:**
 
-After the smoke tests, `chars_per_token` and `expected_output_tokens` get calibrated from
-the real `usage` counts.
+| model | input (est.) | output incl. reasoning (est.) | hidden reasoning |
+|---|---|---|---|
+| gpt-oss-120b, Banking77 | 1,069 (543) | 48, p90 65 (250) | 24 (reported in `completion_tokens_details`) |
+| qwen3.8-27b, Banking77 | 549 (543) | 18, p90 19 (30) | 0 (`reasoning_effort = none`) |
+| gpt-oss-safeguard-20b, Aegis | 361 (297) | 89, p90 159, max 563 (250) | 68 |
+
+What the numbers showed:
+- **gpt-oss writes the JSON schema into the prompt.** Banking77's 78-option schema adds
+  about 514 input tokens. The estimator now adds the schema's size for those models
+  (`ChatModel.schema_in_prompt`), and `expected_output_tokens` is set from the means
+  above. Dry runs are now within 1–4% of the real input counts.
+- **Groq counts actual tokens** (input + output) against TPM, not `max_completion_tokens`,
+  according to the `x-ratelimit-remaining-tokens` headers.
+
+**Provider behaviour:**
+- **Safeguard** accepts a system message and `reasoning_effort = "low"`, and its free
+  tier is 2,000 TPM (header-confirmed).
+  - 2 of 20 examples failed with a new error code, `output_parse_failed`.
+  - Its `failed_generation` held the model's *reasoning*, which restates the input. Such
+    text is now removed from every error message and never stored for Aegis (only its
+    length).
+- **Qwen at temperature 1.0 degenerates.** In the first run, 11 of 20 examples failed:
+  any failed sample sank its example. In the re-run, after that was fixed, 17 of 91
+  sample calls (19%) failed.
+  - The failed outputs: `{"token`, repeated words, misspelled labels.
+  - Groq rejects them with `json_validate_failed`, so strict mode doesn't constrain
+    decoding for Qwen. A temperature-0 main call also produced an invalid label once.
+  - A failed sample now counts as a disagreeing sample.
+- **Burst pacing:** sending an example's k+1 calls together overran safeguard's 2K TPM.
+  12 of 20 examples needed 2–4 attempts. Calls are now paced one by one (`CallGate`).
+- **Daily limit:** never reached, so its 429 wording is still unobserved. The tests use
+  Groq's commonly reported form.
+
+**Do samples differ?**
+
+| run | agreement with the main answer (valid samples) | examples with any disagreeing sample |
+|---|---|---|
+| gpt-oss-120b, temperature only | 0.95 | 2/20 |
+| safeguard-20b, temperature only | 0.98 | 1/18 |
+| qwen, shuffle+paraphrase | 0.72 | 9/19 |
+
+Temperature alone barely moves the gpt-oss models. The Qwen run differs in both model
+and variation, so it doesn't separate the two effects. A controlled comparison is
+planned.
 
 **Paid providers (no keys yet):**
 

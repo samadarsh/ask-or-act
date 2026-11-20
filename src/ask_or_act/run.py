@@ -28,6 +28,7 @@ from typing import Any
 from ask_or_act.core.budget import BudgetExceededError
 from ask_or_act.core.cache import DecisionCache
 from ask_or_act.core.config import RunConfig, load_config
+from ask_or_act.core.limits import CallGate
 from ask_or_act.core.runner import Runner, RunOutcome, RunPlan
 from ask_or_act.core.runs import environment_info, git_info, make_run_id, save_run
 from ask_or_act.core.types import JSON, sha256_hex
@@ -110,6 +111,10 @@ def run_from_config(
         sample_cache=cache,
         refresh=refresh,
         transport=transport,
+        # Per-call pacing for multi-call deciders (the runner paces everything else).
+        gate=CallGate.from_rates(
+            cfg.execution.requests_per_minute, cfg.execution.tokens_per_minute
+        ),
     )
     decider = build_decider(cfg.decider, context)
     try:

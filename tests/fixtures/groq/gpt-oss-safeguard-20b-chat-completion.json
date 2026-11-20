@@ -1,0 +1,39 @@
+{
+ "id": "chatcmpl-gpt-oss-safeguard-20b",
+ "object": "chat.completion",
+ "created": 1795162491,
+ "model": "openai/gpt-oss-safeguard-20b",
+ "choices": [
+  {
+   "index": 0,
+   "message": {
+    "role": "assistant",
+    "content": "{\"answer\":\"safe\",\"confidence\":99}"
+   },
+   "logprobs": null,
+   "finish_reason": "stop"
+  }
+ ],
+ "usage": {
+  "queue_time": 0.15612091,
+  "prompt_tokens": 818,
+  "prompt_time": 0.005562078,
+  "completion_tokens": 40,
+  "completion_time": 0.040497771,
+  "total_tokens": 858,
+  "total_time": 0.046059849,
+  "prompt_tokens_details": {
+   "cached_tokens": 768
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 19
+  }
+ },
+ "usage_breakdown": null,
+ "system_fingerprint": "fp_d2c1e3347c",
+ "x_groq": {
+  "id": "req_gpt-oss-safeguard-20b",
+  "seed": 68164847
+ },
+ "service_tier": "on_demand"
+}

@@ -64,10 +64,56 @@ class RateLimiter:
 
     def charge(self, amount: float) -> None:
         """Take ``amount`` more tokens without waiting, e.g. when a call used more tokens
-        than estimated. Later ``acquire`` calls wait it off."""
-        if amount > 0:
-            self._refill()
-            self._tokens -= amount
+        than estimated; later ``acquire`` calls wait it off. A negative amount gives
+        back tokens that were over-reserved (never beyond a full bucket)."""
+        self._refill()
+        self._tokens = min(self._capacity, self._tokens - amount)
+
+
+class CallGate:
+    """Per-HTTP-call pacing, for deciders that make several calls per example.
+
+    The runner normally paces whole batches: it reserves an example's estimated
+    requests and tokens, then lets the decider run. That's fine for one call per
+    example. But with self-consistency, all k+1 calls then leave within a second. On a
+    tight limit (gpt-oss-safeguard-20b: 2,000 tokens/min, ~650 tokens/call) that burst
+    alone exceeds the per-minute limit, gets 429s, and the retry repeats calls that had
+    already succeeded. Measured in the 2026-11-20 smoke test: 12 of 20 examples needed
+    2–4 attempts.
+
+    A decider that sets ``uses_call_gate = True`` awaits the gate before every call
+    instead, and the runner skips its own pacing for it.
+    """
+
+    def __init__(self, rpm: RateLimiter | None, tpm: RateLimiter | None) -> None:
+        self.rpm = rpm
+        self.tpm = tpm
+
+    @classmethod
+    def from_rates(
+        cls,
+        requests_per_minute: float | None,
+        tokens_per_minute: float | None,
+        *,
+        clock: Clock = time.monotonic,
+        sleep: Sleep = asyncio.sleep,
+    ) -> "CallGate":
+        def make(rate: float | None) -> RateLimiter | None:
+            return RateLimiter(rate, clock=clock, sleep=sleep) if rate else None
+
+        return cls(make(requests_per_minute), make(tokens_per_minute))
+
+    async def __call__(self, tokens: int) -> None:
+        """Wait until one request with about ``tokens`` tokens may be sent."""
+        if self.rpm:
+            await self.rpm.acquire(1)
+        if self.tpm:
+            await self.tpm.acquire(tokens)
+
+    def charge(self, extra_tokens: int) -> None:
+        """Account for tokens used beyond the estimate (or credit a negative amount)."""
+        if self.tpm:
+            self.tpm.charge(extra_tokens)
 
 
 @dataclass(frozen=True)

@@ -26,7 +26,7 @@ sample_temperature = 1.0
 sample_variation = "none"
 reasoning_effort = "low"
 max_output_tokens = 1024
-expected_output_tokens = 250
+expected_output_tokens = 90  # measured 2026-11-20: mean 89 (68 reasoning), p90 159
 
 [execution]
 max_concurrency = 1

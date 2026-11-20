@@ -215,3 +215,38 @@ def groq_429(window: str, *, retry_after: str = "7") -> httpx.Response:
         json={"error": {"message": message, "type": "requests", "code": "rate_limit_exceeded"}},
         headers={"retry-after": retry_after},
     )
+
+
+def groq_json_failed(generation: str = '{"token') -> httpx.Response:
+    """Groq's 400 when output fails JSON validation (wording from the 2026-11-20 smoke
+    test, qwen/qwen3.8-27b with strict json_schema)."""
+    return httpx.Response(
+        400,
+        json={
+            "error": {
+                "message": "Failed to generate JSON. Please adjust your prompt. See "
+                "'failed_generation' for more details.",
+                "type": "invalid_request_error",
+                "code": "json_validate_failed",
+                "failed_generation": generation,
+            }
+        },
+    )
+
+
+def groq_parse_failed(generation: str) -> httpx.Response:
+    """Groq's 400 when the output can't be parsed at all. Seen 2026-11-20 on
+    gpt-oss-safeguard-20b: ``failed_generation`` held the model's *reasoning*, which can
+    restate the input. Tests pass a harmless placeholder."""
+    return httpx.Response(
+        400,
+        json={
+            "error": {
+                "message": "Parsing failed. The model generated output that could not be "
+                "parsed. Please adjust your prompt. See 'failed_generation' for more details.",
+                "type": "invalid_request_error",
+                "code": "output_parse_failed",
+                "failed_generation": generation,
+            }
+        },
+    )

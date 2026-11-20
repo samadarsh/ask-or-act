@@ -5,10 +5,11 @@ import json
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 
 from ask_or_act.core.cache import DecisionCache
-from ask_or_act.core.limits import RateLimiter, RetryPolicy
+from ask_or_act.core.limits import CallGate, RateLimiter, RetryPolicy
 from ask_or_act.core.runner import ExecutionConfig, Runner
 from ask_or_act.core.runs import load_run
 from ask_or_act.core.types import DeciderConfig, Example
@@ -17,7 +18,13 @@ from ask_or_act.deciders.http import _excerpt
 from ask_or_act.deciders.prompts import OTHER
 from ask_or_act.run import EXIT_NEEDS_APPROVAL, EXIT_OK, EXIT_QUOTA, run_from_config
 from tests.helpers import FakeClock
-from tests.provider_fixtures import Recorder, groq_429, groq_ok
+from tests.provider_fixtures import (
+    Recorder,
+    groq_429,
+    groq_json_failed,
+    groq_ok,
+    groq_parse_failed,
+)
 from tests.test_run_end_to_end import write_world
 
 KEY = "gsk-test-SECRET-456"
@@ -303,3 +310,142 @@ def test_run_stops_at_the_daily_limit_and_resumes_from_cache(
     assert rec2.metadata["status"] == "completed"
     assert sum(d.cached for d in rec2.decisions) == 2
     assert all(d.ok for d in rec2.decisions)
+
+
+def test_json_validation_failure_on_the_main_call_is_an_invalid_answer() -> None:
+    rec = Recorder([groq_json_failed('{"token')])
+    (d,) = run(make("qwen/qwen3.8-27b", rec), bank()).decisions
+    assert d.choice is None
+    assert d.error is not None
+    assert d.error.startswith("invalid output: HTTP 400 json_validate_failed")
+    assert d.raw["main"] == {"error_code": "json_validate_failed", "failed_generation": '{"token'}
+    assert len(rec.requests) == 1  # permanent: not retried
+
+
+def test_one_failed_sample_does_not_sink_the_example(tmp_path: Path) -> None:
+    rec = Recorder([groq_ok("card_arrival", 80), groq_ok("card_arrival", 70), groq_json_failed()])
+    cache = DecisionCache(tmp_path / "c.sqlite")
+    params = {"samples": 2, "confidence_signal": "self_consistency"}
+    decider = make("openai/gpt-oss-120b", rec, params, cache=cache)
+    execution = ExecutionConfig(max_concurrency=1, retry=RetryPolicy(max_retries=0))
+    (d,) = run(decider, bank(), execution=execution).decisions
+    assert d.ok
+    assert d.raw["failed_samples"] == 1
+    assert d.signals["self_consistency"] == 0.5  # the failed sample counts as disagreeing
+    # The failed sample was not cached; the good one was.
+    identity = decider._sample_identity()
+    ex = bank()[0].public()
+    hits = [cache.get(identity, ex, {"sample_index": i, "temperature": 1.0}) for i in (0, 1)]
+    assert sum(h is not None for h in hits) == 1
+
+
+def test_response_format_override() -> None:
+    rec = Recorder([groq_ok("top_up", 60, model="qwen/qwen3.8-27b")])
+    run(make("qwen/qwen3.8-27b", rec, {"response_format": "none"}), bank())
+    assert "response_format" not in rec.bodies()[0]
+    rec = Recorder([groq_ok("top_up", 60, model="qwen/qwen3.8-27b")])
+    run(make("qwen/qwen3.8-27b", rec, {"response_format": "json_object"}), bank())
+    assert rec.bodies()[0]["response_format"] == {"type": "json_object"}
+    with pytest.raises(ValueError, match="response_format must be one of"):
+        make("qwen/qwen3.8-27b", rec, {"response_format": "xml"})
+    ctx = DeciderContext(dataset="banking77", env={}, transport=rec.transport)
+    with pytest.raises(ValueError, match="chat-completions providers"):
+        build_decider(DeciderConfig("openai", "gpt-6-luna", "v1", {"response_format": "none"}), ctx)
+
+
+SECRET_TEXT = "PLACEHOLDER-FOR-RESTATED-INPUT"
+
+
+def test_failed_generation_never_reaches_errors_or_storage_on_sensitive_tasks() -> None:
+    """On Aegis, a failed generation may be reasoning that restates unsafe input. Only
+    its length is kept, and error messages carry only the error code."""
+    rec = Recorder(
+        [
+            groq_ok("unsafe", 90, model="openai/gpt-oss-safeguard-20b"),
+            groq_parse_failed(f"We need to decide ... {SECRET_TEXT}"),
+            groq_parse_failed(f"Reasoning ... {SECRET_TEXT}"),
+        ]
+    )
+    ex = [Example("aegis:1", "[redacted]", ("safe", "unsafe"), "unsafe")]
+    params = {"samples": 1, "system_prompt": True}
+    d = make("openai/gpt-oss-safeguard-20b", rec, params, dataset="aegis")
+    execution = ExecutionConfig(max_concurrency=1, retry=RetryPolicy(max_retries=0))
+    (ok,) = run(d, ex, execution=execution).decisions  # main ok, sample failed
+    assert ok.ok
+    assert SECRET_TEXT not in json.dumps(ok.to_json())
+    (bad,) = run(d, [Example("aegis:2", "[redacted]", ("safe", "unsafe"), "safe")]).decisions
+    assert bad.error == "invalid output: output_parse_failed"
+    assert SECRET_TEXT not in json.dumps(bad.to_json())
+    assert bad.raw["main"] == {
+        "error_code": "output_parse_failed",
+        "failed_generation_chars": len(f"Reasoning ... {SECRET_TEXT}"),
+    }
+
+
+def test_error_excerpts_never_include_failed_generation() -> None:
+    body = json.dumps(
+        {"error": {"code": "something_else", "failed_generation": SECRET_TEXT, "message": "x"}}
+    )
+    assert SECRET_TEXT not in _excerpt(body)
+    assert SECRET_TEXT not in _excerpt(f"not json failed_generation: {SECRET_TEXT}")
+
+
+def test_call_gate_spaces_every_http_call() -> None:
+    """With samples, each call waits at the gate: 1 main + 2 samples at 6 requests/min
+    leave 10 s apart instead of in one burst."""
+    clock = FakeClock()
+    sent: list[float] = []
+    responses = [groq_ok("card_arrival", 80)] * 3
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(clock.now)
+        return responses.pop()
+
+    gate = CallGate.from_rates(6, None, clock=clock, sleep=clock.sleep)
+    ctx = DeciderContext(
+        dataset="banking77", env=ENV, transport=httpx.MockTransport(handler), gate=gate
+    )
+    d = build_decider(DeciderConfig("groq", "openai/gpt-oss-120b", "v1", {"samples": 2}), ctx)
+    execution = ExecutionConfig(requests_per_minute=6, retry=RetryPolicy(max_retries=0))
+    runner = Runner(d, execution=execution, clock=clock, sleep=clock.sleep)
+    (out,) = asyncio.run(runner.run(bank())).decisions
+    assert out.ok
+    assert sent == [0.0, 10.0, 20.0]  # the runner didn't also pace (no extra 30 s wait)
+
+
+# ------------------------------------------------- real recorded responses
+
+FIXTURES = Path(__file__).parent / "fixtures" / "groq"
+
+
+@pytest.mark.parametrize(
+    ("tag", "model", "dataset", "options"),
+    [
+        ("gpt-oss-120b", "openai/gpt-oss-120b", "banking77", ("edit_personal_details", "top_up")),
+        ("qwen3.8-27b", "qwen/qwen3.8-27b", "banking77", ("edit_personal_details", "top_up")),
+        (
+            "gpt-oss-safeguard-20b",
+            "openai/gpt-oss-safeguard-20b",
+            "aegis",
+            ("safe", "unsafe"),
+        ),
+    ],
+)
+def test_real_recorded_responses_parse(
+    tag: str, model: str, dataset: str, options: tuple[str, ...]
+) -> None:
+    body = json.loads((FIXTURES / f"{tag}-chat-completion.json").read_text())
+    headers = json.loads((FIXTURES / f"{tag}-rate-limit-headers.json").read_text())
+    rec = Recorder([httpx.Response(200, json=body, headers=headers)])
+    ex = [Example("x:1", "[redacted]", options, options[0])]
+    (d,) = run(make(model, rec, dataset=dataset), ex).decisions
+    assert d.ok
+    assert d.choice in options
+    assert d.input_tokens == body["usage"]["prompt_tokens"]
+    assert d.output_tokens == body["usage"]["completion_tokens"]
+    main = d.raw["main"]
+    assert isinstance(main, dict)
+    assert main["rate_limit"]["x-ratelimit-limit-requests"] == "1000"  # per day
+    assert int(main["rate_limit"]["x-ratelimit-limit-tokens"]) in (2000, 8000)  # per minute
+    if tag.startswith("gpt-oss"):  # gpt-oss reports reasoning tokens; Qwen (off) doesn't
+        assert body["usage"]["completion_tokens_details"]["reasoning_tokens"] > 0

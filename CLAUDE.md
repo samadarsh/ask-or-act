@@ -45,6 +45,7 @@ uv run ask-or-act run configs/fake-banking77.toml --dry-run   # plan + cost, no 
 uv run ask-or-act run configs/fake-banking77.toml             # run, cache, save to runs/
 uv run ask-or-act metrics runs/<id>                # metrics table + runs/<id>/metrics.json
 uv run ask-or-act metrics runs/<a> runs/<b>        # paired comparison (+ ACE views)
+uv run ask-or-act audit-redaction [paths]          # fail if Aegis prompt text is on disk
 ```
 
 Metrics (milestone 2): `metrics/` holds pure functions over saved runs. A run stores
@@ -171,6 +172,9 @@ All four must pass before a change is done.
   used only to train the classic baseline.
 - **Never show raw unsafe text** (Aegis or any safety data) in reports, the README,
   demos, logs or test fixtures. Use IDs or redacted snippets only.
+- **Model output can restate unsafe input.** Reasoning, Groq's `failed_generation` and
+  validation messages are never stored or printed for `SENSITIVE_TASKS` (only lengths
+  and error codes). Check new error paths for this.
 
 **Baselines (M3, M7)**
 - Always compare against simple baselines: always-cheap, always-strong, and random at

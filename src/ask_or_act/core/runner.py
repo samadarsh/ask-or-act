@@ -146,14 +146,16 @@ class Runner:
 
         ex_cfg = self.execution
         semaphore = asyncio.Semaphore(ex_cfg.max_concurrency)
+        # Deciders that pace each HTTP call through a CallGate are not paced here too.
+        self_paced = bool(getattr(self.decider, "uses_call_gate", False))
         rpm = (
             RateLimiter(ex_cfg.requests_per_minute, clock=self._clock, sleep=self._sleep)
-            if ex_cfg.requests_per_minute
+            if ex_cfg.requests_per_minute and not self_paced
             else None
         )
         tpm = (
             RateLimiter(ex_cfg.tokens_per_minute, clock=self._clock, sleep=self._sleep)
-            if ex_cfg.tokens_per_minute
+            if ex_cfg.tokens_per_minute and not self_paced
             else None
         )
 

@@ -16,7 +16,17 @@ Error mapping, which drives the runner's retry policy:
 * A 429 with ``insufficient_quota`` → ``ProviderError``. The spend limit is reached, so
   retrying can't help.
 * Timeouts and connection failures → ``RetryableError``.
+* A 400 whose error code is ``json_validate_failed`` or ``output_parse_failed`` →
+  ``InvalidOutputError``. Groq sends these when the model's output doesn't match the
+  requested JSON format or can't be parsed. It is a *model* failure, not a bad request.
+  The decider records it as an invalid answer.
+* **``failed_generation`` never goes into an error message.** It can hold the model's
+  reasoning, which may restate the input. On Aegis that would be unsafe text. It is
+  removed from every excerpt and passed separately on ``InvalidOutputError``; the
+  decider decides whether to keep it (see ``SENSITIVE_TASKS``).
 * Other 4xx (bad request, safety block, auth) → ``ProviderError``, which is permanent.
+* On SENSITIVE_TASKS the deciders pass every error message through
+  ``public_message``, which keeps only our own wording and the error code.
 """
 
 import json
@@ -34,6 +44,25 @@ class ProviderError(Exception):
     """A permanent provider failure: retrying the same request won't help."""
 
 
+class InvalidOutputError(ProviderError):
+    """The model's output failed the provider's JSON validation (Groq
+    ``json_validate_failed``). ``generation`` is the start of what it produced."""
+
+    def __init__(self, message: str, *, code: str, generation: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.generation = generation
+
+
+def _error_object(text: str) -> dict[str, Any]:
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+    err = data.get("error") if isinstance(data, dict) else None
+    return err if isinstance(err, dict) else {}
+
+
 def api_key(env: Mapping[str, str], name: str) -> str:
     value = env.get(name, "").strip()
     if not value:
@@ -43,10 +72,49 @@ def api_key(env: Mapping[str, str], name: str) -> str:
     return value
 
 
+INVALID_OUTPUT_CODES = ("json_validate_failed", "output_parse_failed")
+
+
 def _excerpt(text: str) -> str:
-    """Error-body excerpt for messages: whitespace collapsed, account/org ids redacted
-    (Groq's 429 bodies name the organization), cut to 300 characters."""
+    """Error-body excerpt for messages: model output (``failed_generation``) removed,
+    whitespace collapsed, account/org ids redacted (Groq's 429 bodies name the
+    organization), cut to 300 characters."""
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        data = None
+    if isinstance(data, dict) and isinstance(data.get("error"), dict):
+        err = data["error"]
+        if "failed_generation" in err:
+            err["failed_generation"] = "[removed]"
+        text = json.dumps(data)
+    elif "failed_generation" in text:
+        text = text.split("failed_generation", 1)[0] + "failed_generation [removed]"
     return _ORG_ID.sub("org_[redacted]", " ".join(text.split()))[:300]
+
+
+_SAFE_HEAD = re.compile(
+    r"^(?:HTTP \d{3}(?: \((?:daily limit|quota exhausted)\)| [a-z_]+(?=:))?"
+    r"|timeout: \w+|network error: \w+|generation stopped: \w+=\w+"
+    r"|no choices in response|model refused|no candidates|blocked or empty answer"
+    r"|response \w+|invalid JSON from provider|provider returned a non-object JSON response"
+    r"|[A-Z][A-Z0-9_]* is not set)"
+)
+_CODE = re.compile(r'"code"\s*:\s*"?([A-Za-z0-9_.-]{1,64})')
+
+
+def public_message(message: str) -> str:
+    """An error message with every provider- or model-supplied text removed.
+
+    For SENSITIVE_TASKS (Aegis). Provider messages can quote the model's output, e.g.
+    a schema-validation message names the invalid value, and that output can restate
+    unsafe input. What survives is our own fixed wording (``HTTP 400``, ``timeout:
+    ReadTimeout``, ...) plus the provider's error *code*, which is an identifier."""
+    head = m.group(0) if (m := _SAFE_HEAD.match(message)) else "provider error"
+    code = _CODE.search(message)
+    if code and code.group(1) not in head:
+        head = f"{head} {code.group(1)}"
+    return f"{head} [details removed: sensitive task]"
 
 
 def _retry_after(headers: Mapping[str, str]) -> float | None:
@@ -103,6 +171,14 @@ async def post_json_full(
             )
         if status == 429 or status >= 500:
             raise RetryableError(f"HTTP {status}: {_excerpt(text)}", retry_after_s=wait)
+        err = _error_object(text)
+        code = str(err.get("code", ""))
+        if code in INVALID_OUTPUT_CODES:
+            raise InvalidOutputError(
+                f"HTTP {status} {code}: {str(err.get('message', ''))[:200]}",
+                code=code,
+                generation=str(err.get("failed_generation", "")),
+            )
         raise ProviderError(f"HTTP {status}: {_excerpt(text)}")
     try:
         data = response.json()

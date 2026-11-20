@@ -23,7 +23,7 @@ sample_temperature = 1.0
 sample_variation = "shuffle+paraphrase"
 reasoning_effort = "none"    # Qwen: disables reasoning
 max_output_tokens = 256
-expected_output_tokens = 30
+expected_output_tokens = 20  # measured 2026-11-20: mean 18, p90 19
 
 [execution]
 max_concurrency = 2

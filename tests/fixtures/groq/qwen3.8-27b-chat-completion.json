@@ -1,0 +1,33 @@
+{
+ "id": "chatcmpl-qwen3.8-27b",
+ "object": "chat.completion",
+ "created": 1795162018,
+ "model": "qwen/qwen3.8-27b",
+ "choices": [
+  {
+   "index": 0,
+   "message": {
+    "role": "assistant",
+    "content": "{\"answer\": \"edit_personal_details\", \"confidence\": 98}"
+   },
+   "logprobs": null,
+   "finish_reason": "stop"
+  }
+ ],
+ "usage": {
+  "queue_time": 0.198270205,
+  "prompt_tokens": 545,
+  "prompt_time": 0.038995647,
+  "completion_tokens": 16,
+  "completion_time": 0.032833848,
+  "total_tokens": 561,
+  "total_time": 0.071829495
+ },
+ "usage_breakdown": null,
+ "system_fingerprint": "fp_a1293f40b5",
+ "x_groq": {
+  "id": "req_qwen3.8-27b",
+  "seed": 1005612974
+ },
+ "service_tier": "on_demand"
+}
