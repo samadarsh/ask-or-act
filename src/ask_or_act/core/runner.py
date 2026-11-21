@@ -29,7 +29,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 
 from ask_or_act.core.budget import BudgetExceededError, BudgetGuard
-from ask_or_act.core.cache import DecisionCache
+from ask_or_act.core.cache import DecisionCache, cache_key
 from ask_or_act.core.decider import CostEstimate, Decider, QuotaExhaustedError, RetryableError
 from ask_or_act.core.limits import Clock, RateLimiter, RetryPolicy, Sleep
 from ask_or_act.core.types import Decision, Example, PublicExample
@@ -55,6 +55,9 @@ class RunPlan:
     cached: Mapping[str, Decision]  # example id -> decision served from the cache
     batches: tuple[tuple[Example, ...], ...]
     estimate: CostEstimate  # cost of the uncached calls only
+    # Uncached example id -> id of an earlier example with the identical input (same
+    # cache key). Only the first is called; the others share its decision.
+    duplicates: Mapping[str, str] = field(default_factory=dict)
 
     @property
     def n_cached(self) -> int:
@@ -126,10 +129,27 @@ class Runner:
             raise ValueError("example ids must be unique within a run")
         cached = self._cached(examples)
         misses = [ex for ex in examples if ex.id not in cached]
+        duplicates: dict[str, str] = {}
+        # Deciders whose answer depends only on (config, input) can share one call
+        # between examples with identical input. MT-Bench needs this: votes from
+        # several judges on one comparison all send the same prompt (500 votes per
+        # half, 274 distinct comparisons). Opt-in, because e.g. the cross-fitted
+        # classic baseline answers by example id.
+        if getattr(self.decider, "same_input_same_decision", False):
+            first: dict[str, str] = {}
+            unique = []
+            for ex in misses:
+                key = cache_key(self.decider.config, ex)
+                if key in first:
+                    duplicates[ex.id] = first[key]
+                else:
+                    first[key] = ex.id
+                    unique.append(ex)
+            misses = unique
         size = self.decider.max_batch_size
         batches = tuple(tuple(misses[i : i + size]) for i in range(0, len(misses), size))
         estimate = sum((self.decider.estimate(b) for b in batches), CostEstimate())
-        return RunPlan(len(examples), cached, batches, estimate)
+        return RunPlan(len(examples), cached, batches, estimate, duplicates)
 
     # ------------------------------------------------------------------ execution
 
@@ -167,6 +187,11 @@ class Runner:
         results = await asyncio.gather(*(run_batch(b) for b in plan.batches))
 
         by_id = {**plan.cached, **{d.example_id: d for batch in results for d in batch}}
+        for dup, original in plan.duplicates.items():
+            # Served from this run's own answer, like a cache hit: true cost kept,
+            # nothing charged.
+            d = by_id[original]
+            by_id[dup] = replace(d, example_id=dup, cached=d.ok, charged_usd=0.0)
         decisions = tuple(by_id[ex.id] for ex in examples)
         return RunOutcome(
             decisions=decisions,

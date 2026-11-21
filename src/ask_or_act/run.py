@@ -19,7 +19,7 @@ import asyncio
 import hashlib
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -31,7 +31,7 @@ from ask_or_act.core.config import RunConfig, load_config
 from ask_or_act.core.limits import CallGate
 from ask_or_act.core.runner import Runner, RunOutcome, RunPlan
 from ask_or_act.core.runs import environment_info, git_info, make_run_id, save_run
-from ask_or_act.core.types import JSON, sha256_hex
+from ask_or_act.core.types import JSON, Example, sha256_hex
 from ask_or_act.data import manifest as manifest_io
 from ask_or_act.deciders import DeciderContext, build_decider
 
@@ -55,7 +55,13 @@ def _describe_plan(cfg: RunConfig, plan: RunPlan, refresh: bool) -> str:
     e = plan.estimate
     lines = [
         f"plan: {plan.n_examples} examples, {plan.n_cached} cached"
-        f"{' (cache bypassed: --refresh)' if refresh else ''}, {e.calls} API call(s) to make",
+        f"{' (cache bypassed: --refresh)' if refresh else ''}"
+        + (
+            f", {len(plan.duplicates)} sharing another example's identical input"
+            if plan.duplicates
+            else ""
+        )
+        + f", {e.calls} API call(s) to make",
         f"estimate: ~{e.input_tokens:,} input + ~{e.output_tokens:,} output tokens "
         f"= ${e.usd:.4f} charged (budget ${cfg.budget_usd:.4f})",
     ]
@@ -87,6 +93,30 @@ def _describe_plan(cfg: RunConfig, plan: RunPlan, refresh: bool) -> str:
     return "\n".join(lines)
 
 
+@dataclass(frozen=True)
+class ConfigPlan:
+    """What `ask-or-act study status` needs from a dry run."""
+
+    plan: RunPlan
+    # Main calls this config would make, keyed by their cache key (with estimated
+    # tokens). A self-consistency config whose main calls an earlier main-only config
+    # in the same queue will make doesn't need them again.
+    pending_main: dict[str, int]
+
+
+def plan_config(config_path: Path, *, raw_dir: Path) -> ConfigPlan:
+    """Dry-run plan of a config, without printing. Calls nothing."""
+    result: list[ConfigPlan] = []
+
+    def capture(runner: Runner, examples: Sequence[Example], plan: RunPlan) -> None:
+        pending = getattr(runner.decider, "pending_main", None)
+        misses = [ex for b in plan.batches for ex in b]
+        result.append(ConfigPlan(plan, pending(misses) if pending else {}))
+
+    run_from_config(config_path, raw_dir=raw_dir, dry_run=True, out=lambda _: None, _peek=capture)
+    return result[0]
+
+
 def run_from_config(
     config_path: Path,
     *,
@@ -96,12 +126,20 @@ def run_from_config(
     refresh: bool = False,
     out: Callable[[str], None] = print,
     transport: Any = None,
+    _peek: Callable[[Runner, Sequence[Example], RunPlan], None] | None = None,
 ) -> RunResult:
     from ask_or_act.data.examples import load_examples  # needs the `data` extra
 
     cfg = load_config(config_path)
     manifest = manifest_io.read(cfg.dataset.manifest)
-    examples = load_examples(manifest, raw_dir, cfg.dataset.split, cfg.dataset.limit)
+    examples = load_examples(
+        manifest,
+        raw_dir,
+        cfg.dataset.split,
+        cfg.dataset.limit,
+        per_label=cfg.dataset.per_label,
+        stratify=cfg.dataset.stratify,
+    )
     cache = DecisionCache(cfg.cache_path) if cfg.cache_path else None
     # API keys are read from the environment at call time (never here, never logged).
     context = DeciderContext(
@@ -126,6 +164,8 @@ def run_from_config(
             refresh=refresh,
         )
         plan = runner.plan(examples)
+        if _peek is not None:
+            _peek(runner, examples, plan)  # while the cache is still open
         out(_describe_plan(cfg, plan, refresh))
         if dry_run:
             out("dry run: nothing was called")
@@ -173,6 +213,8 @@ def run_from_config(
             "source": {"repo": manifest.source.repo, "revision": manifest.source.revision},
             "split": cfg.dataset.split,
             "limit": cfg.dataset.limit,
+            "per_label": cfg.dataset.per_label,
+            "stratify": cfg.dataset.stratify,
             "n_examples": len(examples),
             "example_ids_sha256": sha256_hex([ex.id for ex in examples]),
         },
@@ -198,6 +240,8 @@ def run_from_config(
             "errors": outcome.n_errors,
             "skipped": outcome.n_skipped,
         },
+        # Requests actually sent and tokens used this run (deciders that count them).
+        "api_usage": getattr(decider, "api_usage", None),
         "quota": None
         if outcome.quota_stopped is None
         else {"message": outcome.quota_stopped, "retry_after_s": outcome.quota_retry_after_s},

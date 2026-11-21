@@ -68,6 +68,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="score this recorded signal as the confidence, e.g. "
         "verbalized, token_logprob, verbalized_logprob, self_consistency, native",
     )
+    study = sub.add_parser("study", help="run a multi-day schedule of configs, one day at a time")
+    study_sub = study.add_subparsers(dest="study_command", required=True)
+    s_run = study_sub.add_parser(
+        "run", help="run every unfinished config, models in parallel, until done or quota"
+    )
+    s_run.add_argument("schedule", type=Path)
+    s_run.add_argument("--yes", action="store_true", help="approve provider calls")
+    s_run.add_argument("--raw-dir", type=Path, default=DEFAULT_RAW_DIR)
+    s_stat = study_sub.add_parser("status", help="progress and quota use; calls nothing")
+    s_stat.add_argument("schedule", type=Path)
+    s_stat.add_argument("--raw-dir", type=Path, default=DEFAULT_RAW_DIR)
+
     aud = sub.add_parser(
         "audit-redaction",
         help="fail if any Aegis prompt text appears in runs, caches or logs",
@@ -76,7 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
         "paths",
         nargs="*",
         type=Path,
-        help="files or directories to scan (default: runs/ and .cache/)",
+        help="files or directories to scan (default: runs/, .cache/, logs/)",
     )
     aud.add_argument("--raw-dir", type=Path, default=DEFAULT_RAW_DIR)
     aud.add_argument("--ngram", type=int, default=8, help="words per matched n-gram")
@@ -84,6 +96,28 @@ def build_parser() -> argparse.ArgumentParser:
         "--min-words", type=int, default=5, help="skip prompts shorter than this many words"
     )
     return parser
+
+
+def _run_study(args: argparse.Namespace) -> int:
+    from ask_or_act import study
+    from ask_or_act.core.config import ConfigError
+
+    try:
+        schedule = study.load_schedule(args.schedule)
+        if args.study_command == "status":
+            study.status(schedule, args.raw_dir)
+            return 0
+        if not args.yes:
+            print(
+                "study run calls provider APIs (free tier uses the daily quota): "
+                "check `ask-or-act study status` and re-run with --yes",
+                file=sys.stderr,
+            )
+            return 3
+        return study.run(schedule, args.raw_dir, approve=True)
+    except (ConfigError, manifest.ManifestError, FileNotFoundError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
 
 
 def _run_audit(args: argparse.Namespace) -> int:
@@ -171,6 +205,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_run(args)
     if args.command == "metrics":
         return _run_metrics(args)
+    if args.command == "study":
+        return _run_study(args)
     if args.command == "audit-redaction":
         return _run_audit(args)
     parser.print_help()

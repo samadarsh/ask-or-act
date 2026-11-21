@@ -66,6 +66,8 @@ class GeminiDecisionsDecider:
     def config(self) -> DeciderConfig:
         return self._config
 
+    same_input_same_decision = True  # see Runner.plan
+
     @property
     def max_batch_size(self) -> int:
         return 1

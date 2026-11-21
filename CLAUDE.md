@@ -46,6 +46,8 @@ uv run ask-or-act run configs/fake-banking77.toml             # run, cache, save
 uv run ask-or-act metrics runs/<id>                # metrics table + runs/<id>/metrics.json
 uv run ask-or-act metrics runs/<a> runs/<b>        # paired comparison (+ ACE views)
 uv run ask-or-act audit-redaction [paths]          # fail if Aegis prompt text is on disk
+uv run ask-or-act study status configs/study/schedule.toml   # study progress; no calls
+scripts/daily.sh [schedule]                        # today's study runs (asks first)
 ```
 
 Metrics (milestone 2): `metrics/` holds pure functions over saved runs. A run stores

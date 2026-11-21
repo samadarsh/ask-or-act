@@ -23,3 +23,6 @@ data/cache/
 runs/
 
 .DS_Store
+
+# Daily study logs (scripts/daily.sh); may name ids and errors, never input text.
+logs/

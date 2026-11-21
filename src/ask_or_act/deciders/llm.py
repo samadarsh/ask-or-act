@@ -57,6 +57,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Protocol
 
+from ask_or_act.core.cache import cache_key
 from ask_or_act.core.decider import CostEstimate, QuotaExhaustedError, RetryableError
 from ask_or_act.core.types import JSON, DeciderConfig, Decision, PublicExample
 from ask_or_act.deciders import DeciderContext
@@ -554,6 +555,15 @@ class PromptedLLMDecider:
             "tier": self.tier,
         }
         self._config = DeciderConfig(config.type, config.model, config.prompt_version, resolved)
+        # HTTP requests actually sent by this decider object, and the tokens they used
+        # (cache hits excluded). Saved in run.json as "api_usage", which is how
+        # `ask-or-act study status` knows each model's quota use today.
+        self.api_usage: dict[str, int | None] = {
+            "requests": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "provider_remaining_requests": None,  # last x-ratelimit-remaining-requests
+        }
 
     @property
     def config(self) -> DeciderConfig:
@@ -574,11 +584,10 @@ class PromptedLLMDecider:
         """Input ≈ (prompt chars, plus the JSON schema's chars where the server writes
         it into the prompt) / chars_per_token; output = expected_output_tokens per call,
         hidden reasoning included. Both were calibrated on the 2026-11-20 smoke runs
-        (see docs/deciders.md). Self-consistency samples are assumed uncached, so the
-        estimate is conservative. On a free tier ``usd`` is 0 and ``list_usd`` is the
+        (see docs/deciders.md). Main calls and samples already in the cache are not
+        counted. On a free tier ``usd`` is 0 and ``list_usd`` is the
         same tokens at the published paid price."""
-        calls = (1 + self.samples) * len(examples)
-        tokens_in = 0
+        calls = tokens_in = 0
         schema_too = self.provider.schema_in_prompt(self._config.model)
         for ex in examples:
             options = self._options(ex)
@@ -586,11 +595,49 @@ class PromptedLLMDecider:
             chars = len(user) + len(sys_msg or "")
             if schema_too and self.response_format not in ("json_object", "none"):
                 chars += len(json.dumps(answer_schema(options)))  # as measured
-            tokens_in += (int(chars / self.chars_per_token) + 1) * (1 + self.samples)
+            n = self._uncached_calls(ex)
+            calls += n
+            tokens_in += (int(chars / self.chars_per_token) + 1) * n
         tokens_out = calls * self.expected_output_tokens
         list_usd = self.price.pricing.cost(tokens_in, tokens_out)
         charged = 0.0 if self.tier == "free" else list_usd
         return CostEstimate(calls, tokens_in, tokens_out, charged, list_usd)
+
+    def _uncached_calls(self, ex: PublicExample) -> int:
+        """Calls this example still needs: the main call unless it is in the cache
+        (e.g. made by a main-only config), plus each sample not yet cached."""
+        cache = self.ctx.sample_cache
+        if cache is None or self.ctx.refresh:
+            return 1 + self.samples
+        main = cache.get(self._main_identity(), ex, self.MAIN_EXTRA) is None
+        identity = self._sample_identity()
+        samples = sum(
+            cache.get(identity, ex, self._sample_extra(i)) is None for i in range(self.samples)
+        )
+        return int(main) + samples
+
+    def pending_main(self, examples: Sequence[PublicExample]) -> dict[str, int]:
+        """Main calls not yet cached: cache key -> estimated tokens. Lets
+        `ask-or-act study status` see that a self-consistency config will reuse the
+        main calls an earlier main-only config makes."""
+        cache = self.ctx.sample_cache
+        identity = self._main_identity()
+        schema_too = self.provider.schema_in_prompt(self._config.model)
+        out: dict[str, int] = {}
+        for ex in examples:
+            if cache is not None and cache.get(identity, ex, self.MAIN_EXTRA) is not None:
+                continue
+            options = self._options(ex)
+            sys_msg, user = build_prompt(self.task, ex, options, system=self.system_prompt)
+            chars = len(user) + len(sys_msg or "")
+            if schema_too and self.response_format not in ("json_object", "none"):
+                chars += len(json.dumps(answer_schema(options)))
+            tokens = int(chars / self.chars_per_token) + 1 + self.expected_output_tokens
+            out[cache_key(identity, ex, self.MAIN_EXTRA)] = tokens
+        return out
+
+    def _sample_extra(self, i: int) -> dict[str, JSON]:
+        return {"sample_index": i, "temperature": self.sample_temperature}
 
     def _spec(
         self,
@@ -620,6 +667,8 @@ class PromptedLLMDecider:
     # calls of one example don't leave in a burst. The runner then skips its own
     # per-batch pacing for this decider.
     uses_call_gate = True
+    # The runner may share one decision between examples with identical input.
+    same_input_same_decision = True
 
     def _call_tokens(self, spec: CallSpec) -> int:
         chars = len(spec.prompt) + len(spec.system or "")
@@ -637,6 +686,8 @@ class PromptedLLMDecider:
         expected = self._call_tokens(spec)
         if gate is not None:
             await gate(expected)
+        usage = self.api_usage
+        usage["requests"] = (usage["requests"] or 0) + 1
         try:
             response, resp_headers = await post_json_full(
                 url, body, headers=headers, transport=self.ctx.transport
@@ -652,6 +703,11 @@ class PromptedLLMDecider:
             raise
         if gate is not None:
             gate.charge(completion.input_tokens + completion.output_tokens - expected)
+        usage["input_tokens"] = (usage["input_tokens"] or 0) + completion.input_tokens
+        usage["output_tokens"] = (usage["output_tokens"] or 0) + completion.output_tokens
+        remaining = resp_headers.get("x-ratelimit-remaining-requests")
+        if remaining is not None and remaining.isdigit():
+            usage["provider_remaining_requests"] = int(remaining)
         if self.provider.record_headers:
             completion.raw["rate_limit"] = {
                 k: v
@@ -707,8 +763,35 @@ class PromptedLLMDecider:
         (ex,) = examples
         return [await self._decide(ex)]
 
-    async def _decide(self, ex: PublicExample) -> Decision:
-        options = self._options(ex)
+    # Params that do NOT change the main call: everything about samples, and which
+    # signal is reported. So a self-consistency config (samples = 3) finds the main
+    # call that a main-only config (samples = 0) already made and paid for.
+    MAIN_KEY_EXCLUDED = frozenset(
+        {"confidence_signal", "samples", "sample_temperature", "sample_variation"}
+    )
+    MAIN_EXTRA: ClassVar[dict[str, JSON]] = {"call": "main"}
+
+    def _main_identity(self) -> DeciderConfig:
+        params = {k: v for k, v in self._config.params.items() if k not in self.MAIN_KEY_EXCLUDED}
+        return DeciderConfig(
+            f"{self._config.type}:main", self._config.model, self._config.prompt_version, params
+        )
+
+    async def _main(self, ex: PublicExample, options: tuple[str, ...]) -> Decision:
+        """The main call as a Decision of its own (its signals, no samples), cached
+        under ``_main_identity`` in the sample cache."""
+        cache = self.ctx.sample_cache
+        identity = self._main_identity()
+        if cache is not None and not self.ctx.refresh:
+            hit = cache.get(identity, ex, self.MAIN_EXTRA)
+            if hit is not None:
+                return hit
+        d = await self._call_main(ex, options)
+        if cache is not None:
+            cache.put(identity, ex, d, self.MAIN_EXTRA)  # stores successful answers only
+        return d
+
+    async def _call_main(self, ex: PublicExample, options: tuple[str, ...]) -> Decision:
         system, prompt = build_prompt(self.task, ex, options, system=self.system_prompt)
         try:
             main = await self._call(
@@ -740,20 +823,17 @@ class PromptedLLMDecider:
         }
         if not self.provider.supports_logprobs:
             raw["unsupported_signals"] = list(LOGPROB_SIGNALS)
-        if parsed.answer not in options:
+        common: dict[str, Any] = {
+            "model": self._config.model,
+            "input_tokens": main.input_tokens,
+            "output_tokens": main.output_tokens,
+            "cost_usd": cost,
+            "charged_usd": charged,
+        }
+        if not valid:
             return Decision(
-                ex.id,
-                None,
-                None,
-                model=self._config.model,
-                input_tokens=main.input_tokens,
-                output_tokens=main.output_tokens,
-                cost_usd=cost,
-                charged_usd=charged,
-                raw=raw,
-                error=self._invalid(parsed.answer),
+                ex.id, None, None, raw=raw, error=self._invalid(parsed.answer), **common
             )
-
         signals: dict[str, float] = {}
         if parsed.confidence is not None and 0 <= parsed.confidence <= 100:
             signals["verbalized"] = parsed.confidence / 100
@@ -767,11 +847,31 @@ class PromptedLLMDecider:
                 raw["hybrid_mode"] = hybrid.mode
         if OTHER in options:
             raw["answered_other"] = parsed.answer == OTHER
+        # Stored confidence is a placeholder; _decide sets the configured signal.
+        return Decision(
+            ex.id,
+            parsed.answer,
+            max(0.0, min(1.0, signals.get("verbalized", 0.0))),
+            signals=signals,
+            raw=raw,
+            **common,
+        )
 
+    async def _decide(self, ex: PublicExample) -> Decision:
+        options = self._options(ex)
+        main = await self._main(ex, options)
+        if not main.ok:
+            return main
+        assert main.choice is not None
+        signals = dict(main.signals)
+        raw: dict[str, JSON] = dict(main.raw)
+        if main.cached:
+            raw["main_cached"] = True
+        cost, charged = main.cost_usd, main.charged_usd or 0.0
         tokens_in, tokens_out = main.input_tokens, main.output_tokens
         if self.samples:
             answers, sample_records = await self._samples(ex, options)
-            signals["self_consistency"] = sum(a == parsed.answer for a in answers) / len(answers)
+            signals["self_consistency"] = sum(a == main.choice for a in answers) / len(answers)
             for rec in sample_records:
                 cost += rec.cost_usd
                 charged += rec.charged_usd or 0.0
@@ -787,32 +887,18 @@ class PromptedLLMDecider:
         if confidence is None:
             confidence = signals.get("verbalized")
             raw["confidence_fallback"] = True
+        common: dict[str, Any] = {
+            "signals": signals,
+            "model": self._config.model,
+            "input_tokens": tokens_in,
+            "output_tokens": tokens_out,
+            "cost_usd": cost,
+            "charged_usd": charged,
+            "raw": raw,
+        }
         if confidence is None:
-            return Decision(
-                ex.id,
-                None,
-                None,
-                signals=signals,
-                model=self._config.model,
-                input_tokens=tokens_in,
-                output_tokens=tokens_out,
-                cost_usd=cost,
-                charged_usd=charged,
-                raw=raw,
-                error="no usable confidence signal",
-            )
-        return Decision(
-            example_id=ex.id,
-            choice=parsed.answer,
-            confidence=max(0.0, min(1.0, confidence)),
-            signals=signals,
-            model=self._config.model,
-            input_tokens=tokens_in,
-            output_tokens=tokens_out,
-            cost_usd=cost,
-            charged_usd=charged,
-            raw=raw,
-        )
+            return Decision(ex.id, None, None, error="no usable confidence signal", **common)
+        return Decision(ex.id, main.choice, max(0.0, min(1.0, confidence)), **common)
 
     # Params that do NOT change what a single sample call returns: how many samples,
     # which signal is reported, and the main call's own temperature/logprobs/seed
@@ -835,7 +921,7 @@ class PromptedLLMDecider:
         identity = self._sample_identity()
 
         async def one(i: int) -> Decision:
-            extra: dict[str, JSON] = {"sample_index": i, "temperature": self.sample_temperature}
+            extra = self._sample_extra(i)
             cache = self.ctx.sample_cache
             if cache is not None and not self.ctx.refresh:
                 hit = cache.get(identity, ex, extra)

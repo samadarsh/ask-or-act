@@ -151,22 +151,17 @@ def test_self_consistency_samples_are_cached_individually(tmp_path: Path) -> Non
     assert d.charged_usd == pytest.approx(d.cost_usd)  # everything was paid for now
 
     # k: 3 → 5. Main call + first 3 samples come from cache; only 2 new samples are paid.
-    rec2 = Recorder(
-        [
-            openai_response("card_arrival", 75),
-            openai_response("card_arrival", 75),
-            openai_response("card_arrival", 75),
-        ]
-    )
+    rec2 = Recorder([openai_response("card_arrival", 75), openai_response("card_arrival", 75)])
     params5 = {**params, "samples": 5}
     with DecisionCache(cache_path) as cache:
         (d5,) = run(
             make("openai", "gpt-6-luna", rec2, params=params5, cache=cache), bank_examples()
         ).decisions
-    assert len(rec2.requests) == 1 + 2  # new main call (config changed) + 2 new samples
+    assert len(rec2.requests) == 2  # main call cached under its own key; 2 new samples
+    assert d5.raw["main_cached"] is True
     assert d5.signals["self_consistency"] == pytest.approx(4 / 5)
     assert d5.charged_usd is not None
-    assert d5.charged_usd < d5.cost_usd  # 3 samples were reused, not re-billed
+    assert d5.charged_usd < d5.cost_usd  # main + 3 samples were reused, not re-billed
 
 
 def test_self_consistency_estimate_counts_every_call() -> None:

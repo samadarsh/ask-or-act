@@ -6,8 +6,8 @@ How it works:
    train) as overlapping **word n-grams** (default 8 words, lower-cased, punctuation
    ignored). Prompts shorter than n words but at least ``min_words`` long are indexed
    whole. Shorter prompts are too generic to match safely and are skipped (counted).
-2. Scan files under the given paths (default: ``runs/`` and ``.cache/``) with every
-   string decoded first, so JSON escapes don't hide a match:
+2. Scan files under the given paths (default: ``runs/``, ``.cache/`` and ``logs/``)
+   with every string decoded first, so JSON escapes don't hide a match:
    - JSON / JSON Lines, string by string;
    - SQLite databases, value by value (each value also decoded as JSON);
    - any other text file, as text (``\\n``-style escapes are undone).
@@ -33,7 +33,7 @@ from typing import Any
 from ask_or_act.data.hub import read_json_rows
 from ask_or_act.data.sources import AEGIS, AEGIS_TRAIN
 
-DEFAULT_TARGETS = (Path("runs"), Path(".cache"))
+DEFAULT_TARGETS = (Path("runs"), Path(".cache"), Path("logs"))
 _WORD = re.compile(r"[^\W_]+")
 _ESCAPE = re.compile(r"\\[nrtu\"\\/]")
 MAX_FILE_BYTES = 512 * 1024 * 1024

@@ -21,11 +21,27 @@ class ConfigError(ValueError):
     pass
 
 
+type Stratify = Literal["random", "label", "question"]
+
+
 @dataclass(frozen=True)
 class DatasetConfig:
+    """Which examples a run uses (see data/examples.py ``select``).
+
+    * ``limit`` alone: a seeded-random subset (smoke runs).
+    * ``limit`` + ``stratify = "label"``: the same share of each gold label as the split.
+    * ``limit`` + ``stratify = "question"`` (MT-Bench): whole questions, so a question's
+      votes are never split.
+    * ``per_label = N``: exactly N examples per gold label (e.g. 4 per Banking77 intent).
+
+    All of them take examples in seeded order, so a smaller subset is contained in a
+    larger one: a self-consistency subset reuses the main runs' cached calls."""
+
     manifest: Path
     split: SplitChoice = "test"
-    limit: int | None = None  # take a seeded-random subset of this size (for smoke runs)
+    limit: int | None = None
+    per_label: int | None = None
+    stratify: Stratify = "random"
 
 
 @dataclass(frozen=True)
@@ -96,8 +112,22 @@ def parse_config(data: dict[str, Any]) -> RunConfig:
     limit = ds.get("limit", int, None)
     if limit is not None and limit < 1:
         raise ConfigError("[dataset] limit must be >= 1")
+    per_label = ds.get("per_label", int, None)
+    if per_label is not None and per_label < 1:
+        raise ConfigError("[dataset] per_label must be >= 1")
+    if per_label is not None and limit is not None:
+        raise ConfigError("[dataset] set either limit or per_label, not both")
+    stratify = ds.get("stratify", str, "random")
+    if stratify not in ("random", "label", "question"):
+        raise ConfigError("[dataset] stratify must be random, label or question")
+    if stratify != "random" and limit is None:
+        raise ConfigError("[dataset] stratify needs limit")
     dataset = DatasetConfig(
-        Path(ds.get("manifest", str, required=True)), cast(SplitChoice, split), limit
+        Path(ds.get("manifest", str, required=True)),
+        cast(SplitChoice, split),
+        limit,
+        per_label,
+        cast(Stratify, stratify),
     )
     ds.finish()
 

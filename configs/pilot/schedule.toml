@@ -1,0 +1,12 @@
+# Day-1 pilot. `ask-or-act study run configs/pilot/schedule.toml --yes`
+usable_share = 0.9
+configs = [
+  "configs/pilot/p1-gpt-oss-120b-banking77-json-object.toml",
+  "configs/pilot/p2-gpt-oss-120b-banking77-variation.toml",
+  "configs/pilot/p3-qwen3.8-27b-banking77-temp07.toml",
+  "configs/pilot/p4-gpt-oss-20b-banking77.toml",
+  "configs/pilot/p5-gpt-oss-120b-mt_bench.toml",
+  "configs/pilot/p6-qwen3.8-27b-mt_bench.toml",
+  "configs/pilot/p7-gpt-oss-120b-aegis.toml",
+  "configs/pilot/p8-qwen3.8-27b-aegis.toml",
+]

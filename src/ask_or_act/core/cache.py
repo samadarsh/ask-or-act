@@ -44,7 +44,8 @@ def cache_key(
 class DecisionCache:
     def __init__(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        self._db = sqlite3.connect(path)
+        # timeout: several runs (one per model, `ask-or-act study run`) share the file.
+        self._db = sqlite3.connect(path, timeout=60.0)
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute(
             "CREATE TABLE IF NOT EXISTS decisions ("
