@@ -18,15 +18,35 @@ change would mean a new, separately registered analysis. `tests/test_guarantees.
 | test | exact binomial, ToE Eq. (4); stop at the first failure |
 | MT-Bench unit | one example per comparison with the majority human label (below) |
 | MT-Bench ties | no strict plurality → comparison excluded and counted |
-| MT-Bench target | **α = 0.25, δ = 0.1**, registered 2026-11-22 (see below) |
-| Banking77 target | **α = 0.10, δ = 0.10**, registered 2026-11-22 (wrong intent on routed queries) |
-| Aegis target | **α = 0.10, δ = 0.10**, registered 2026-11-22 (wrong safe/unsafe label on acted-on prompts) |
+| MT-Bench target | **α = 0.25, δ = 0.1**, registered 2026-11-21 18:53:21 UTC, commit f73f6e0 (see below) |
+| Banking77 target | **α = 0.10, δ = 0.10**, registered 2026-11-21 19:27:51 UTC, commit 4ce46c1 (wrong intent on routed queries) |
+| Aegis target | **α = 0.10, δ = 0.10**, registered 2026-11-21 19:27:51 UTC, commit 4ce46c1 (wrong safe/unsafe label on acted-on prompts) |
 
-**Data that existed when the targets were registered (2026-11-22).** No pilot or study
-runs. The 2026-11-20 smoke runs did exist: 20 Banking77 test examples on gpt-oss-120b
-and qwen3.8-27b, and 20 Aegis test examples on gpt-oss-safeguard-20b; their accuracy and
-ECE had been seen. α = 0.10 was the CLI default before those runs and was not tuned to
-them. Every Banking77, Aegis and MT-Bench config in `configs/study/`, `configs/pilot/`
+**Dates are UTC everywhere** (run ids, logs, `study status`, these records). A
+registration's date and time are those of the commit that made it; `git log
+--format='%H %cI'` is the proof. The registered *values* have never changed. On
+2026-11-21 the date fields were corrected from 2026-11-22 (the author's local date) to
+the UTC commit date; nothing else changed.
+
+**What LLM data existed at each registration (UTC, from git and the run records):**
+
+| time (2026-11-21 UTC) | event |
+|---|---|
+| (2026-11-20) | smoke runs: 20 Banking77 test examples on gpt-oss-120b and qwen3.8-27b, 20 Aegis test examples on gpt-oss-safeguard-20b; accuracy and ECE reported |
+| 17:13:55 | grid, scan starts, δ split frozen (fe6ff9d) |
+| 18:53:21 | **MT-Bench target registered** (f73f6e0). No MT-Bench LLM data existed. |
+| 19:21:02 | first pilot session starts: Banking77 calls (p1, and p2–p4 partly) |
+| 19:22:54 | p1's result printed (20 Banking77 test examples, accuracy 0.80) |
+| 19:27:51 | **Banking77 and Aegis targets registered** (4ce46c1) |
+| 19:37:24 | first MT-Bench pilot call (p6) |
+| 19:39:55 | first Aegis pilot call (p8) |
+
+- **MT-Bench and Aegis:** registered before any pilot data on them.
+- **Banking77:** registered 6 min 49 s *after* the first Banking77 pilot calls, and
+  about 5 minutes after p1's result was printed. α = 0.10 had been the CLI default
+  since before any LLM data, and was the value named in the registration request.
+  It was not chosen from those 20 examples. Still, strictly it is **not a clean
+  pre-registration**, and reports should say so. Every Banking77, Aegis and MT-Bench config in `configs/study/`, `configs/pilot/`
 and `configs/baselines/` carries its `[guarantee]` table. The smoke and fake configs
 don't: they are not part of the study.
 
@@ -47,8 +67,8 @@ uv run ask-or-act thresholds --cal runs/<cheap-cal> runs/<strong-cal> --test run
   - *escalate*: send it to a human.
 - **The guarantee:** with probability ≥ 1 − δ over the calibration half, the error rate
   on acted-on examples is ≤ α, for new data from the same distribution.
-- **Pre-registered MT-Bench target: α = 0.25, δ = 0.1** (fixed 2026-11-22, before any
-  LLM data on MT-Bench existed). It is roughly the human ceiling: on the calibration
+- **Pre-registered MT-Bench target: α = 0.25, δ = 0.1** (fixed 2026-11-21 18:53:21 UTC,
+  before any LLM data on MT-Bench existed). It is roughly the human ceiling: on the calibration
   half a typical human agrees with the other voters' majority h = 74.6% of the time
   (1 − h = 0.254). A fixed α = 0.1 is infeasible for everyone on MT-Bench.
   - It is recorded in every MT-Bench run config as a `[guarantee]` table (study,

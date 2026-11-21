@@ -203,10 +203,12 @@ All four must pass before a change is done.
 - **Pre-registered and FROZEN (2026-11-21):** the grid, scan starts, δ split and the
   MT-Bench unit/tie rule (docs/guarantees.md). They were chosen on the free baselines and
   fakes only. Never change them after seeing LLM results.
-- **MT-Bench target pre-registered (2026-11-22): α = 0.25, δ = 0.1**, in each MT-Bench
+- **MT-Bench target pre-registered (2026-11-21 UTC): α = 0.25, δ = 0.1**, in each MT-Bench
   config's `[guarantee]` table. `--alpha-vs-human` is a sensitivity analysis only.
-- **Banking77 and Aegis targets pre-registered (2026-11-22): α = 0.10, δ = 0.10**, same
+- **Banking77 and Aegis targets pre-registered (2026-11-21 UTC): α = 0.10, δ = 0.10**, same
   `[guarantee]` table. Future work: a class-conditional Aegis target on missed unsafe.
+  Banking77's came 7 min after the first Banking77 pilot calls (docs/guarantees.md).
+- **Dates are UTC everywhere.** A registration's date is its commit's UTC date.
 
 **CI gate and decision changelog (M6)**
 - Inspired by Self-Improvement Memory (arXiv 2611.18856). Every run appends an entry

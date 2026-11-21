@@ -352,12 +352,12 @@ def test_thresholds_cli_uses_the_preregistered_alpha(
     manifest_path = write_world(tmp_path, monkeypatch)
     cfg = write_config(tmp_path, manifest_path)
     text = cfg.read_text().replace('split = "test"', 'split = "calibration"')
-    cfg.write_text(text + '\n[guarantee]\nalpha = 0.2\ndelta = 0.05\nregistered = "2026-11-22"\n')
+    cfg.write_text(text + '\n[guarantee]\nalpha = 0.2\ndelta = 0.05\nregistered = "2026-11-21"\n')
     result = run_from_config(cfg, raw_dir=tmp_path, out=lambda _: None)
     assert result.run_dir is not None
     assert main(["thresholds", "--cal", str(result.run_dir)]) == 0
     out = capsys.readouterr().out
-    assert "target α = 0.2: pre-registered in the run config, registered 2026-11-22" in out
+    assert "target α = 0.2: pre-registered in the run config, registered 2026-11-21" in out
     assert "risk ≤ 0.2 on acted-on examples with probability ≥ 0.950 (δ = 0.05)" in out
     assert main(["thresholds", "--cal", str(result.run_dir), "--alpha", "0.3"]) == 0
     assert "α = 0.3 is NOT the pre-registered target (α = 0.2" in capsys.readouterr().out

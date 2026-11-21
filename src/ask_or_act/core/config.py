@@ -54,7 +54,7 @@ class GuaranteeConfig:
 
     alpha: float | None = None
     delta: float | None = None
-    registered: str | None = None  # date the target was fixed, e.g. "2026-11-22"
+    registered: str | None = None  # date the target was fixed, e.g. "2026-11-21"
     note: str | None = None
 
 

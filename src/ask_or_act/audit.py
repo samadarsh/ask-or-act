@@ -5,7 +5,15 @@ How it works:
 1. Index every Aegis prompt in the local raw files (test, validation and, if present,
    train) as overlapping **word n-grams** (default 8 words, lower-cased, punctuation
    ignored). Prompts shorter than n words but at least ``min_words`` long are indexed
-   whole. Shorter prompts are too generic to match safely and are skipped (counted).
+   whole.
+   **Short prompts** (under ``min_words`` words) are too generic for a substring match
+   ("how do i" is in everything), so they are checked by **exact match**: a decoded
+   **JSON or SQLite string value** matches when its normalized words equal the whole
+   prompt's. That catches a short prompt stored as a value of its own (an error
+   message, a field: how runs and the cache store data), not one embedded in longer
+   text. Plain-text lines (logs, code) are not exact-matched: one-word lines such as
+   "try:" equal some one-word prompts. Prompts equal to ``OWN_VOCABULARY`` (our own
+   field values and Python keywords) or under 3 characters are skipped (counted).
 2. Scan files under the given paths (default: ``runs/``, ``.cache/`` and ``logs/``)
    with every string decoded first, so JSON escapes don't hide a match:
    - JSON / JSON Lines, string by string;
@@ -23,6 +31,7 @@ what stop restated text.
 
 import contextlib
 import json
+import keyword
 import re
 import sqlite3
 from collections.abc import Iterable, Iterator, Sequence
@@ -43,6 +52,28 @@ def words(text: str) -> list[str]:
     return _WORD.findall(text.lower())
 
 
+# Our own structural vocabulary: values and keys the code writes itself (split names,
+# chat roles, labels, statuses, comparison-run labels). A few one-word Aegis prompts
+# equal some of these (found 2026-11-21), so exact-matching them would flag every
+# run.json. They are skipped by the short-prompt check and counted in the report.
+OWN_VOCABULARY = frozenset(
+    {
+        "test", "calibration", "all", "train", "validation",
+        "assistant", "user", "system", "developer",
+        "a", "b", "safe", "unsafe", "tie", "model a", "model b", "other",
+        "stop", "length", "completed", "quota stopped", "budget stopped", "ok", "error",
+        "none", "true", "false", "null", "auto", "free", "paid", "low", "medium", "high",
+        "main", "sample", "verbalized", "self consistency", "native",
+    }
+    # Python keywords: a one-line code diff ("try:") stored as a JSON value, e.g. in a
+    # session transcript, equals a one-word prompt.
+    | {k.lower() for k in keyword.kwlist}
+)  # fmt: skip
+
+
+MIN_SHORT_CHARS = 3  # "?" or "x" can't carry unsafe content; matching them is noise
+
+
 @dataclass
 class Index:
     n: int
@@ -50,12 +81,23 @@ class Index:
     grams: dict[tuple[str, ...], str] = field(default_factory=dict)  # n-gram -> row id
     lengths: set[int] = field(default_factory=set)
     prompts: int = 0
-    skipped_short: int = 0
+    short: dict[str, str] = field(default_factory=dict)  # normalized short prompt -> id
+    short_ignored: int = 0  # short prompts in OWN_VOCABULARY or under 3 chars (unchecked)
+
+    @property
+    def n_short(self) -> int:
+        return len(self.short)
 
     def add(self, row_id: str, text: str) -> None:
         w = words(text)
+        if not w:
+            return
         if len(w) < self.min_words:
-            self.skipped_short += 1
+            norm = " ".join(w)
+            if norm in OWN_VOCABULARY or len(norm) < MIN_SHORT_CHARS:
+                self.short_ignored += 1
+            else:
+                self.short.setdefault(norm, row_id)
             return
         self.prompts += 1
         size = min(self.n, len(w))
@@ -63,10 +105,15 @@ class Index:
         for i in range(len(w) - size + 1):
             self.grams.setdefault(tuple(w[i : i + size]), row_id)
 
-    def matches(self, text: str) -> dict[str, int]:
-        """Aegis row id -> number of matching n-grams in ``text``."""
+    def matches(self, text: str, *, value: bool = False) -> dict[str, int]:
+        """Aegis row id -> number of matching n-grams in ``text``. With ``value`` (a
+        decoded JSON/SQLite string), an exact match of a short prompt counts as 1."""
         w = words(text)
         hits: dict[str, int] = {}
+        if value and 0 < len(w) < self.min_words:
+            row_id = self.short.get(" ".join(w))
+            if row_id is not None:
+                hits[row_id] = 1
         for size in self.lengths:
             for i in range(len(w) - size + 1):
                 row_id = self.grams.get(tuple(w[i : i + size]))
@@ -105,7 +152,7 @@ def _strings(value: Any) -> Iterator[str]:
             yield from _strings(v)
 
 
-def _sqlite_texts(path: Path) -> Iterator[tuple[str, str]]:
+def _sqlite_texts(path: Path) -> Iterator[tuple[str, str, bool]]:
     con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
         tables = [r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")]
@@ -117,12 +164,12 @@ def _sqlite_texts(path: Path) -> Iterator[tuple[str, str]]:
                         v = v.decode("utf-8", "replace")
                     if isinstance(v, str):
                         for s in _strings(v):
-                            yield f"{t} rowid {rowid}", s
+                            yield f"{t} rowid {rowid}", s, True
     finally:
         con.close()
 
 
-def file_texts(path: Path) -> Iterator[tuple[str, str]]:
+def file_texts(path: Path) -> Iterator[tuple[str, str, bool]]:
     """(location, text) pairs for one file, strings decoded."""
     with path.open("rb") as f:
         head = f.read(16)
@@ -136,19 +183,19 @@ def file_texts(path: Path) -> Iterator[tuple[str, str]]:
     if path.suffix in (".json", ".jsonl"):
         try:
             for s in _strings(json.loads(text)):
-                yield "json", s
+                yield "json", s, True
             return
         except json.JSONDecodeError:
             pass
         for i, line in enumerate(text.splitlines(), 1):
             try:
                 for s in _strings(json.loads(line)):
-                    yield f"line {i}", s
+                    yield f"line {i}", s, True
             except json.JSONDecodeError:
-                yield f"line {i}", _ESCAPE.sub(" ", line)
+                yield f"line {i}", _ESCAPE.sub(" ", line), False
         return
     for i, line in enumerate(text.splitlines(), 1):
-        yield f"line {i}", _ESCAPE.sub(" ", line)
+        yield f"line {i}", _ESCAPE.sub(" ", line), False
 
 
 def iter_files(targets: Iterable[Path], exclude: Sequence[Path]) -> Iterator[Path]:
@@ -182,9 +229,9 @@ def audit(targets: Iterable[Path], index: Index, exclude: Sequence[Path] = ()) -
     result = AuditResult()
     for p in iter_files(targets, exclude):
         result.files += 1
-        for location, text in file_texts(p):
+        for location, text, value in file_texts(p):
             result.strings += 1
-            for row_id, count in index.matches(text).items():
+            for row_id, count in index.matches(text, value=value).items():
                 result.matches.append(Match(p, location, row_id, count))
     return result
 
@@ -209,9 +256,15 @@ def run_audit(
     result = audit(existing, index, exclude=[raw_dir])
     out(
         f"indexed {index.prompts:,} Aegis prompts from {len(sources)} file(s) as {n}-word "
-        f"n-grams ({index.skipped_short:,} prompts under {min_words} words skipped)"
+        f"n-grams, plus {index.n_short:,} distinct prompts under {min_words} words by exact "
+        f"match of a whole JSON/SQLite value ({index.short_ignored} not checked: our own "
+        "vocabulary, e.g. a split name, or under 3 characters)"
     )
     out(f"scanned {result.files:,} file(s), {result.strings:,} string(s)")
+    if result.files == 0:
+        # An audit that looked at nothing must not report "OK" (e.g. a mistyped path).
+        out("error: no files were scanned; check the paths")
+        return 2
     if not result.matches:
         out("OK: no Aegis prompt text found")
         return 0

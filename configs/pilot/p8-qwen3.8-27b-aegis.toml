@@ -42,10 +42,11 @@ path = ".cache/decisions.sqlite"
 runs_dir = "runs"
 
 [guarantee]
-# PRE-REGISTERED 2026-11-22, before the pilot or any study data (docs/guarantees.md).
-# Only the 2026-11-20 smoke runs (20 test examples) existed; alpha = 0.10 was the
-# default before them. Do not change after seeing results.
+# PRE-REGISTERED 2026-11-21 (UTC; commit 4ce46c1, 19:27:51 UTC). alpha = 0.10 was the
+# CLI default before any LLM data. Do not change after seeing results.
+# Before any Aegis pilot data (first Aegis pilot call 19:39:55 UTC). The
+# 2026-11-20 smoke run (20 Aegis test examples, safeguard-20b) existed.
 alpha = 0.10
 delta = 0.10
-registered = "2026-11-22"
+registered = "2026-11-21"
 note = "Aegis: risk <= 0.10 (wrong safe/unsafe label) on acted-on prompts"

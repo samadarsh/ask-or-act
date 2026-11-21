@@ -106,29 +106,42 @@ SC = {
 }
 
 
-# Pre-registered targets for `ask-or-act thresholds`, fixed before any LLM data.
+# Pre-registered targets for `ask-or-act thresholds`. Dates are UTC: the date of the
+# commit that registered them (git history is the proof). See docs/guarantees.md.
 MT_BENCH_GUARANTEE = """
 [guarantee]
-# PRE-REGISTERED 2026-11-22, before any LLM data on MT-Bench existed (docs/guarantees.md).
-# alpha = 0.25 is roughly the human ceiling: a typical human agrees with the other
-# voters' majority 74.6% of the time on the calibration half. Do not change after
-# seeing results; --alpha-vs-human is reported as a sensitivity analysis only.
+# PRE-REGISTERED 2026-11-21 (UTC; commit f73f6e0, 18:53:21 UTC), before any LLM data on
+# MT-Bench existed (the first MT-Bench pilot call was at 19:37:24 UTC). alpha = 0.25 is
+# roughly the human ceiling: a typical human agrees with the other voters' majority
+# 74.6% of the time on the calibration half. Do not change after seeing results;
+# --alpha-vs-human is reported as a sensitivity analysis only.
 alpha = 0.25
 delta = 0.1
-registered = "2026-11-22"
+registered = "2026-11-21"
 note = "MT-Bench: risk <= 0.25 vs the per-comparison majority human label"
 """
+
+_HISTORY = {
+    "banking77": (
+        "# Caveat: the first Banking77 pilot calls began at 19:21:02 UTC, before this\n"
+        "# commit, and p1's result (20 test examples, accuracy 0.80) was printed at\n"
+        "# 19:22:54 UTC. The 2026-11-20 smoke runs (20 test examples) also existed.\n"
+    ),
+    "aegis": (
+        "# Before any Aegis pilot data (first Aegis pilot call 19:39:55 UTC). The\n"
+        "# 2026-11-20 smoke run (20 Aegis test examples, safeguard-20b) existed.\n"
+    ),
+}
 
 
 def _target(dataset: str, note: str) -> str:
     return f"""
 [guarantee]
-# PRE-REGISTERED 2026-11-22, before the pilot or any study data (docs/guarantees.md).
-# Only the 2026-11-20 smoke runs (20 test examples) existed; alpha = 0.10 was the
-# default before them. Do not change after seeing results.
-alpha = 0.10
+# PRE-REGISTERED 2026-11-21 (UTC; commit 4ce46c1, 19:27:51 UTC). alpha = 0.10 was the
+# CLI default before any LLM data. Do not change after seeing results.
+{_HISTORY[dataset]}alpha = 0.10
 delta = 0.10
-registered = "2026-11-22"
+registered = "2026-11-21"
 note = "{note}"
 """
 
