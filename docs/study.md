@@ -101,6 +101,20 @@ The calibration half was never used in the smoke or pilot runs, so thresholds ar
 on untouched data. Banking77's target registration came ~7 minutes after the first
 Banking77 pilot calls; this is disclosed in docs/guarantees.md and is not changed.
 
+## Study freeze (2026-11-22 UTC, before day 2, until the study ends)
+
+The study and pilot configs, and the code that resolves them into requests and cache
+keys, are frozen. `tests/test_study_freeze.py` pins four hashes per config (44
+configs) in `tests/fixtures/study_freeze.json`:
+
+- resolved settings, i.e. everything in the cache keys;
+- the request bodies for a synthetic example;
+- the selected example ids;
+- the config file.
+
+CI fails if a code change alters any of them. Re-pinning needs the author's approval.
+The pinned settings match the decider config recorded in every pilot run's `run.json`.
+
 ## Approved schedule (2026-11-21 UTC; measured tokens, 90% of each model's limits)
 
 Day 1 was the pilot. Each day: run `scripts/daily.sh` once after the quota resets.

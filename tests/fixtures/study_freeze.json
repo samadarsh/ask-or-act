@@ -1,0 +1,266 @@
+{
+  "configs/pilot/p1-gpt-oss-120b-banking77-json-object.toml": {
+    "examples": "abb1bc21c35f3b5d37d33c1940a5b709f99c845c11bd4fa6ac4285b00477fff5",
+    "file": "ea3e1dad952715b3d10adb8516e75a3f982ca37ec315cb6502e824270e0151ac",
+    "requests": "64141e3ddcb5c36f04c0759279259d5f3b5be43c3afad2eb7c3914dd65bdf116",
+    "settings": "54880dbb420d014b2c5e541fbd5db0c99eb17e1173575a1e0ee1e1be40332be2"
+  },
+  "configs/pilot/p2-gpt-oss-120b-banking77-variation.toml": {
+    "examples": "abb1bc21c35f3b5d37d33c1940a5b709f99c845c11bd4fa6ac4285b00477fff5",
+    "file": "c0c3b52dfaaf38384ce8eafe7d3e12412e5d49ed8ac41264819d890995f80b40",
+    "requests": "81e41b913de67e0567818097273a44c1e41858cb6db12989aef95ff59165e007",
+    "settings": "338d8c17d8fb309d9c981dc39cdaa8224cfae16e616e672a24c34391e9724d72"
+  },
+  "configs/pilot/p3-qwen3.8-27b-banking77-temp07.toml": {
+    "examples": "abb1bc21c35f3b5d37d33c1940a5b709f99c845c11bd4fa6ac4285b00477fff5",
+    "file": "d74bfd1fd7c96e6a020ba3f569528943e0c9f78b370936a92227825e8a43baf8",
+    "requests": "2caf854e63b0e934117346ab80c553885b02bb9694167129c07e9203ad7d57c7",
+    "settings": "463111365bf92215cf498f3ee69a19ba3d8d8e86a103d1d65fb8397336c045a6"
+  },
+  "configs/pilot/p4-gpt-oss-20b-banking77.toml": {
+    "examples": "abb1bc21c35f3b5d37d33c1940a5b709f99c845c11bd4fa6ac4285b00477fff5",
+    "file": "b38f4f68302fa27f0f56aedb3352d615156b02813963ef5f55d5164a52b203aa",
+    "requests": "a0e1fd6fd9b56ddfc44e8bd991650eb4548f4f529ee523030b2468d558e050ec",
+    "settings": "b6cc4a7755b43049f1a2616214421bc2206f10aac9769f75ea562334612c52ab"
+  },
+  "configs/pilot/p5-gpt-oss-120b-mt_bench.toml": {
+    "examples": "13a1860505d067f6c6e3934fb33aa5664d892bc0c2999359a16e0b01dfe7e382",
+    "file": "61bda5d2b284ad0562fb9d5b4b9ce1f37144e4cf31c2dc61be2c6a5a202c48eb",
+    "requests": "318ab2e05687efc29acb7aedb88a16870e3d1149b453200b75b4e256303fde50",
+    "settings": "66b88091a73e77b1c6b92b44d901a6388800f652a97d447d96398026dfac8903"
+  },
+  "configs/pilot/p6-qwen3.8-27b-mt_bench.toml": {
+    "examples": "13a1860505d067f6c6e3934fb33aa5664d892bc0c2999359a16e0b01dfe7e382",
+    "file": "724e7187db45f811a5528b68f156adf7c32921755b4b6659439f08e282fce9e7",
+    "requests": "437b113a15029b36da1a03066f5f40629dda4414aef4853240da984eb221a5cb",
+    "settings": "621842a182b3c2b4c62775d5281e7715dec23c12159acb53b50f1a70b4d60942"
+  },
+  "configs/pilot/p7-gpt-oss-120b-aegis.toml": {
+    "examples": "d2ae860c719da423e393ecebb9b230d178ebb3cc876d97fb5c10cc3c0d648202",
+    "file": "c382839d3a4da8924ccf0ec02665e1a399014052668e2e1875caf71cbeedc487",
+    "requests": "df8565d9224362ff9ecc763a7fe750d270114f8336de9d2206e6c40193ced56a",
+    "settings": "66b88091a73e77b1c6b92b44d901a6388800f652a97d447d96398026dfac8903"
+  },
+  "configs/pilot/p8-qwen3.8-27b-aegis.toml": {
+    "examples": "d2ae860c719da423e393ecebb9b230d178ebb3cc876d97fb5c10cc3c0d648202",
+    "file": "93032806d361f7b308f4978034258e6f6cb552463b7b95567a03724cc0a9d1c1",
+    "requests": "5717db3ea178091d0bc05df7cb5d8d6124e5994d9cca5f34f962de8f2e013da0",
+    "settings": "621842a182b3c2b4c62775d5281e7715dec23c12159acb53b50f1a70b4d60942"
+  },
+  "configs/study/gpt-oss-120b/aegis-calibration-sc.toml": {
+    "examples": "5797990adefdecb36c5d9c463dd923deb3bce3c9d3011d6ec2957f86ed643cf3",
+    "file": "6ea55dd2a6e3b5591baaed4fbf83b85c4c970ca1f4b074ed8a6d258c28305d99",
+    "requests": "bff89ff8a9e1e630f8da653341128a0d420374ae860d8a8486cbcbf07a94cb4c",
+    "settings": "338d8c17d8fb309d9c981dc39cdaa8224cfae16e616e672a24c34391e9724d72"
+  },
+  "configs/study/gpt-oss-120b/aegis-calibration.toml": {
+    "examples": "ab59be4c7a92a51b05970fbea2bec8658912577f1ac0e0e9a7cec2e530c4896b",
+    "file": "6b337063777063a8b84ce52faa7d52ed13d2b612be811fdcc2314d46da865bcd",
+    "requests": "df8565d9224362ff9ecc763a7fe750d270114f8336de9d2206e6c40193ced56a",
+    "settings": "66b88091a73e77b1c6b92b44d901a6388800f652a97d447d96398026dfac8903"
+  },
+  "configs/study/gpt-oss-120b/aegis-test-sc.toml": {
+    "examples": "c3a28b5bad515ed5681f79cad3ee6409852f0f1649add7db295beb428396d10b",
+    "file": "48e08cb126a0b775c9e4df649f85e7e84795ab4c9bc66030037de8e3ecb522f8",
+    "requests": "bff89ff8a9e1e630f8da653341128a0d420374ae860d8a8486cbcbf07a94cb4c",
+    "settings": "338d8c17d8fb309d9c981dc39cdaa8224cfae16e616e672a24c34391e9724d72"
+  },
+  "configs/study/gpt-oss-120b/aegis-test.toml": {
+    "examples": "eb671de4d15b2262b4babfbbe820b33367c92011b9942f265761a38090bdb53f",
+    "file": "831596131274fc4fef528ec7f569baac6946f88ecf463a74af672334d2c48884",
+    "requests": "df8565d9224362ff9ecc763a7fe750d270114f8336de9d2206e6c40193ced56a",
+    "settings": "66b88091a73e77b1c6b92b44d901a6388800f652a97d447d96398026dfac8903"
+  },
+  "configs/study/gpt-oss-120b/banking77-calibration-sc.toml": {
+    "examples": "7bbd88a3aeab0f488042a39786a54b2e53d60057480a6f7092bc3991be826b71",
+    "file": "43d41b913603923f484e1f29d96914dfc26d1dacf4d3bcf06a572d1c0d2752f5",
+    "requests": "f612f9f6358313618ce1c613bf701913f4ef0d53502b6c51b82ad3a9c7e19d52",
+    "settings": "2f59a665ab31fccf697923081e426858b6a2a93bf6c724b1598d1da929fdce82"
+  },
+  "configs/study/gpt-oss-120b/banking77-calibration.toml": {
+    "examples": "91799494799572e56019bc4ccc0aa226e45094aee953ed8e30b28e4ef315cb70",
+    "file": "9ae066b67b6b25e926a550b133e18b8b589b86cc33949790175d3ea6251d99ab",
+    "requests": "64141e3ddcb5c36f04c0759279259d5f3b5be43c3afad2eb7c3914dd65bdf116",
+    "settings": "54880dbb420d014b2c5e541fbd5db0c99eb17e1173575a1e0ee1e1be40332be2"
+  },
+  "configs/study/gpt-oss-120b/banking77-test-sc.toml": {
+    "examples": "843b4bb7b1bcf314002d9ccd4e440ab1143f577c534c514225aa1438627eb916",
+    "file": "4946791c613ce4625407e20e76b4c35261e074073066cff68e63d7cee2e1fb47",
+    "requests": "f612f9f6358313618ce1c613bf701913f4ef0d53502b6c51b82ad3a9c7e19d52",
+    "settings": "2f59a665ab31fccf697923081e426858b6a2a93bf6c724b1598d1da929fdce82"
+  },
+  "configs/study/gpt-oss-120b/banking77-test.toml": {
+    "examples": "ebaae7a60ef365d5deec2dd1b20e9590609029c33798b4d4896f94d4c0846eb2",
+    "file": "0152a26d8b75db5e69d63ad2317c6dd506b649390939e6e5481c88e3f757e402",
+    "requests": "64141e3ddcb5c36f04c0759279259d5f3b5be43c3afad2eb7c3914dd65bdf116",
+    "settings": "54880dbb420d014b2c5e541fbd5db0c99eb17e1173575a1e0ee1e1be40332be2"
+  },
+  "configs/study/gpt-oss-120b/mt_bench-calibration-sc.toml": {
+    "examples": "49c2532a57f9a689ab11d8afb6f487bbe10e545043a9862af45406266b4029a0",
+    "file": "7e1c032d14381b5259fefb13faee77e02b1436a092f5aa2eb53d9b0310dacc98",
+    "requests": "6548fc11256deb11c639c15f87b3d25ea4a4e490934e849ec5ecf97907a1eec6",
+    "settings": "338d8c17d8fb309d9c981dc39cdaa8224cfae16e616e672a24c34391e9724d72"
+  },
+  "configs/study/gpt-oss-120b/mt_bench-calibration.toml": {
+    "examples": "cda6fc6b9dc3bef13eb1f58f14bb35058b7e728da5771384106d7f47c379b1cd",
+    "file": "c5284ddea2b49024eb60dfc9104bab3ed4802f2792d3a86fdf30744f33465b16",
+    "requests": "318ab2e05687efc29acb7aedb88a16870e3d1149b453200b75b4e256303fde50",
+    "settings": "66b88091a73e77b1c6b92b44d901a6388800f652a97d447d96398026dfac8903"
+  },
+  "configs/study/gpt-oss-120b/mt_bench-test-sc.toml": {
+    "examples": "cdf7f78c3d32c6d50233f905489590f623590d0e454cf55ba55ee4c5252dfa08",
+    "file": "173be1ac0d6772f929b4e191fa553f93a7ecc6d36ff42050fea690760b8bd094",
+    "requests": "6548fc11256deb11c639c15f87b3d25ea4a4e490934e849ec5ecf97907a1eec6",
+    "settings": "338d8c17d8fb309d9c981dc39cdaa8224cfae16e616e672a24c34391e9724d72"
+  },
+  "configs/study/gpt-oss-120b/mt_bench-test.toml": {
+    "examples": "6011cc1b2e7ba651f9ee7a7e62b8e76cb073fa9a58c3998df6474ba7a0f59301",
+    "file": "cd129d069d437222868c8739dbcf1cf1c5f6e6a46e040d70d0055e42fd38d15b",
+    "requests": "318ab2e05687efc29acb7aedb88a16870e3d1149b453200b75b4e256303fde50",
+    "settings": "66b88091a73e77b1c6b92b44d901a6388800f652a97d447d96398026dfac8903"
+  },
+  "configs/study/gpt-oss-20b/aegis-calibration-sc.toml": {
+    "examples": "5797990adefdecb36c5d9c463dd923deb3bce3c9d3011d6ec2957f86ed643cf3",
+    "file": "2ecc996b911c98c3dd8bef605e395c561c359eb07fb6b1c5f386f7bf545a181b",
+    "requests": "0bdf045d89351644d8e66dd19c6a090737ed9de0d886535de76326f3e59c9912",
+    "settings": "b6cc4a7755b43049f1a2616214421bc2206f10aac9769f75ea562334612c52ab"
+  },
+  "configs/study/gpt-oss-20b/aegis-calibration.toml": {
+    "examples": "ab59be4c7a92a51b05970fbea2bec8658912577f1ac0e0e9a7cec2e530c4896b",
+    "file": "65ff90a3d414d7dd2f89dd2b39da31131548645895af9abea0b2ba083be166b8",
+    "requests": "200f4b2818383a19b8a85e38575f5754c76108d1e4fd1b3baf11081a0faade79",
+    "settings": "f966aa57aaa5efbc62e08aa164af431e522c6864ce97638ce4a1251226b3a3ec"
+  },
+  "configs/study/gpt-oss-20b/aegis-test-sc.toml": {
+    "examples": "c3a28b5bad515ed5681f79cad3ee6409852f0f1649add7db295beb428396d10b",
+    "file": "a176c75ef7f70167be85863004d4edf1f643fde1a5f8ef7f5a92c6f68568953f",
+    "requests": "0bdf045d89351644d8e66dd19c6a090737ed9de0d886535de76326f3e59c9912",
+    "settings": "b6cc4a7755b43049f1a2616214421bc2206f10aac9769f75ea562334612c52ab"
+  },
+  "configs/study/gpt-oss-20b/aegis-test.toml": {
+    "examples": "eb671de4d15b2262b4babfbbe820b33367c92011b9942f265761a38090bdb53f",
+    "file": "8798cbcd91c49902d42b3a4804c6e34adfe40cc97dc1fb7d302b3b254ec9ebf4",
+    "requests": "200f4b2818383a19b8a85e38575f5754c76108d1e4fd1b3baf11081a0faade79",
+    "settings": "f966aa57aaa5efbc62e08aa164af431e522c6864ce97638ce4a1251226b3a3ec"
+  },
+  "configs/study/gpt-oss-20b/banking77-calibration-sc.toml": {
+    "examples": "7bbd88a3aeab0f488042a39786a54b2e53d60057480a6f7092bc3991be826b71",
+    "file": "ef26ec16574e0556d092ad77ed0259b56bc4a88d346f19639a86bd1761f57491",
+    "requests": "dc0086a81ff3121a85ff32238affcd59244e2b873f2817c1783d37791f31b031",
+    "settings": "4e6dd382570a95cb633529f5c9411718e11f7770ae045e78bcb6258b8741c265"
+  },
+  "configs/study/gpt-oss-20b/banking77-calibration.toml": {
+    "examples": "91799494799572e56019bc4ccc0aa226e45094aee953ed8e30b28e4ef315cb70",
+    "file": "7cfe1c36dc06d82a9f9c6d3572777484a773d16bd64860e40a0dec5535058608",
+    "requests": "1d9ee3f280c83efa56fbcd58d9bd2df4740b8b73e2c75d3cb96a21f58bf44a37",
+    "settings": "bcb88b8bcb42b7db0ae938399c709bd068982d80e454a5aceb06b6b133468f08"
+  },
+  "configs/study/gpt-oss-20b/banking77-test-sc.toml": {
+    "examples": "843b4bb7b1bcf314002d9ccd4e440ab1143f577c534c514225aa1438627eb916",
+    "file": "60517e8b075a131c729f9f9a6ddae46194eeeacbb4acc76e1ddfd170ae2c58f1",
+    "requests": "dc0086a81ff3121a85ff32238affcd59244e2b873f2817c1783d37791f31b031",
+    "settings": "4e6dd382570a95cb633529f5c9411718e11f7770ae045e78bcb6258b8741c265"
+  },
+  "configs/study/gpt-oss-20b/banking77-test.toml": {
+    "examples": "ebaae7a60ef365d5deec2dd1b20e9590609029c33798b4d4896f94d4c0846eb2",
+    "file": "aa6b78b472b36550ffbd7b65ac9931e08aad43d639bea10c3c5525e13cedebd1",
+    "requests": "1d9ee3f280c83efa56fbcd58d9bd2df4740b8b73e2c75d3cb96a21f58bf44a37",
+    "settings": "bcb88b8bcb42b7db0ae938399c709bd068982d80e454a5aceb06b6b133468f08"
+  },
+  "configs/study/gpt-oss-safeguard-20b/aegis-calibration-sc.toml": {
+    "examples": "5797990adefdecb36c5d9c463dd923deb3bce3c9d3011d6ec2957f86ed643cf3",
+    "file": "0690498e6706db3aaf02f9a18ce40156898992f8e2ae15523cd808a3684996e6",
+    "requests": "435b4e770a529e425dcacb45356ed969b7f248088c8c1c226112c9d370d8d23f",
+    "settings": "8166bfbf2eb36a1a362e805701838bce04073a82594938413cd5b798858908c9"
+  },
+  "configs/study/gpt-oss-safeguard-20b/aegis-calibration.toml": {
+    "examples": "ab59be4c7a92a51b05970fbea2bec8658912577f1ac0e0e9a7cec2e530c4896b",
+    "file": "885d5aa7ac97feef274a19f75f5dcec29076c9f69b4d101c6f69f2206fc0c75b",
+    "requests": "3a591893553b6ea457222e9542e584edce74b264e3137e98a084bbe68935ebce",
+    "settings": "622c8c29b7d34a4b86b1b7749423b795342c2fbab3568ebe637394b21897f0bf"
+  },
+  "configs/study/gpt-oss-safeguard-20b/aegis-test-sc.toml": {
+    "examples": "c3a28b5bad515ed5681f79cad3ee6409852f0f1649add7db295beb428396d10b",
+    "file": "276aac041024dfcf9abf7418436d78cfd3892e3a479a2f03286510b3d5189085",
+    "requests": "435b4e770a529e425dcacb45356ed969b7f248088c8c1c226112c9d370d8d23f",
+    "settings": "8166bfbf2eb36a1a362e805701838bce04073a82594938413cd5b798858908c9"
+  },
+  "configs/study/gpt-oss-safeguard-20b/aegis-test.toml": {
+    "examples": "eb671de4d15b2262b4babfbbe820b33367c92011b9942f265761a38090bdb53f",
+    "file": "7af3345fe6e5a7798ad9246687857deb0b0c568cf8f1d6327cffd26d05cde299",
+    "requests": "3a591893553b6ea457222e9542e584edce74b264e3137e98a084bbe68935ebce",
+    "settings": "622c8c29b7d34a4b86b1b7749423b795342c2fbab3568ebe637394b21897f0bf"
+  },
+  "configs/study/qwen3.8-27b/aegis-calibration-sc.toml": {
+    "examples": "5797990adefdecb36c5d9c463dd923deb3bce3c9d3011d6ec2957f86ed643cf3",
+    "file": "3d2c3766e7f05a5b76e73d2f7348d4a8ade030a5ec687ec0f562b77271c77c6a",
+    "requests": "5852a85ba47ceaca45e604c8d9dc1b93786ad2f80781a8bbb7d65279d9da5e7c",
+    "settings": "463111365bf92215cf498f3ee69a19ba3d8d8e86a103d1d65fb8397336c045a6"
+  },
+  "configs/study/qwen3.8-27b/aegis-calibration.toml": {
+    "examples": "ab59be4c7a92a51b05970fbea2bec8658912577f1ac0e0e9a7cec2e530c4896b",
+    "file": "6ef58886a4be676e77efc69a0152f8b0a50a2bd4faa1b6985b4e83588e08641f",
+    "requests": "5717db3ea178091d0bc05df7cb5d8d6124e5994d9cca5f34f962de8f2e013da0",
+    "settings": "621842a182b3c2b4c62775d5281e7715dec23c12159acb53b50f1a70b4d60942"
+  },
+  "configs/study/qwen3.8-27b/aegis-test-sc.toml": {
+    "examples": "c3a28b5bad515ed5681f79cad3ee6409852f0f1649add7db295beb428396d10b",
+    "file": "1c003a6cf0d8e0b12c8501f778b8686ebf57c3a6dfce6037bf9e453fabe67768",
+    "requests": "5852a85ba47ceaca45e604c8d9dc1b93786ad2f80781a8bbb7d65279d9da5e7c",
+    "settings": "463111365bf92215cf498f3ee69a19ba3d8d8e86a103d1d65fb8397336c045a6"
+  },
+  "configs/study/qwen3.8-27b/aegis-test.toml": {
+    "examples": "eb671de4d15b2262b4babfbbe820b33367c92011b9942f265761a38090bdb53f",
+    "file": "37a9055685d2a6ee58c3c92bb43583ee8edaaa79bcf839aff18c7749a828424d",
+    "requests": "5717db3ea178091d0bc05df7cb5d8d6124e5994d9cca5f34f962de8f2e013da0",
+    "settings": "621842a182b3c2b4c62775d5281e7715dec23c12159acb53b50f1a70b4d60942"
+  },
+  "configs/study/qwen3.8-27b/banking77-calibration-sc.toml": {
+    "examples": "7bbd88a3aeab0f488042a39786a54b2e53d60057480a6f7092bc3991be826b71",
+    "file": "225a656bc46406ece01dd9642a12afb5b1cb9cd2eb00edeafd4f5183dffdae56",
+    "requests": "2caf854e63b0e934117346ab80c553885b02bb9694167129c07e9203ad7d57c7",
+    "settings": "463111365bf92215cf498f3ee69a19ba3d8d8e86a103d1d65fb8397336c045a6"
+  },
+  "configs/study/qwen3.8-27b/banking77-calibration.toml": {
+    "examples": "91799494799572e56019bc4ccc0aa226e45094aee953ed8e30b28e4ef315cb70",
+    "file": "41c5ea82439153a594e35909b8b7abcde0a5827b70e6bd995b0b59cadaad7049",
+    "requests": "32c445d91e257b964f3ac98f49138ab913414364d5f5c52298e2a13d2cd5aca4",
+    "settings": "621842a182b3c2b4c62775d5281e7715dec23c12159acb53b50f1a70b4d60942"
+  },
+  "configs/study/qwen3.8-27b/banking77-test-sc.toml": {
+    "examples": "843b4bb7b1bcf314002d9ccd4e440ab1143f577c534c514225aa1438627eb916",
+    "file": "40c6e53c49e59aea86e172471ea60267d6f39dd798f311065130dd5d15292a87",
+    "requests": "2caf854e63b0e934117346ab80c553885b02bb9694167129c07e9203ad7d57c7",
+    "settings": "463111365bf92215cf498f3ee69a19ba3d8d8e86a103d1d65fb8397336c045a6"
+  },
+  "configs/study/qwen3.8-27b/banking77-test.toml": {
+    "examples": "ebaae7a60ef365d5deec2dd1b20e9590609029c33798b4d4896f94d4c0846eb2",
+    "file": "30edc8832d98991d2dc68b7a24fc76ce56c558ab9175f117c48af04cf02f963b",
+    "requests": "32c445d91e257b964f3ac98f49138ab913414364d5f5c52298e2a13d2cd5aca4",
+    "settings": "621842a182b3c2b4c62775d5281e7715dec23c12159acb53b50f1a70b4d60942"
+  },
+  "configs/study/qwen3.8-27b/mt_bench-calibration-sc.toml": {
+    "examples": "49c2532a57f9a689ab11d8afb6f487bbe10e545043a9862af45406266b4029a0",
+    "file": "114c25c09713f54c29b4c80d927a4495abb956ef759d13d5192d7302cbc77320",
+    "requests": "d37c6e847bbc80eeaeaa91de6c10813af4dc21983655312c5ac99fa87d17b278",
+    "settings": "463111365bf92215cf498f3ee69a19ba3d8d8e86a103d1d65fb8397336c045a6"
+  },
+  "configs/study/qwen3.8-27b/mt_bench-calibration.toml": {
+    "examples": "cda6fc6b9dc3bef13eb1f58f14bb35058b7e728da5771384106d7f47c379b1cd",
+    "file": "50081c5858d7c2747dd72570d26b367c769d3b8a96cf947e62cfa8ab07bfd50b",
+    "requests": "437b113a15029b36da1a03066f5f40629dda4414aef4853240da984eb221a5cb",
+    "settings": "621842a182b3c2b4c62775d5281e7715dec23c12159acb53b50f1a70b4d60942"
+  },
+  "configs/study/qwen3.8-27b/mt_bench-test-sc.toml": {
+    "examples": "cdf7f78c3d32c6d50233f905489590f623590d0e454cf55ba55ee4c5252dfa08",
+    "file": "7c35a1b9fc9961694e429c23151f334a840a5bd28e405bb358f068be93fc60b0",
+    "requests": "d37c6e847bbc80eeaeaa91de6c10813af4dc21983655312c5ac99fa87d17b278",
+    "settings": "463111365bf92215cf498f3ee69a19ba3d8d8e86a103d1d65fb8397336c045a6"
+  },
+  "configs/study/qwen3.8-27b/mt_bench-test.toml": {
+    "examples": "6011cc1b2e7ba651f9ee7a7e62b8e76cb073fa9a58c3998df6474ba7a0f59301",
+    "file": "854fc637122422f914ca1dc0d44342d90970451a60aafb7b6afcbb5205de3c1b",
+    "requests": "437b113a15029b36da1a03066f5f40629dda4414aef4853240da984eb221a5cb",
+    "settings": "621842a182b3c2b4c62775d5281e7715dec23c12159acb53b50f1a70b4d60942"
+  }
+}

@@ -214,6 +214,14 @@ All four must pass before a change is done.
   author. Test results are reported on the full test half (primary) and without the
   seen ids in `configs/pilot/seen_test_ids.json` (sensitivity). Pilot configs are a
   record: never regenerate them.
+- **STUDY FREEZE (2026-11-22 UTC, until the study ends):** the study and pilot configs
+  and decider config resolution are frozen. That covers `configs/study/`,
+  `configs/pilot/`, `deciders/llm.py` defaults, prompts, cache keys, example selection
+  and `scripts/make_study_configs.py` output. `tests/test_study_freeze.py` pins hashes
+  of every config's resolved settings (cache-key inputs), its request bodies, its
+  selected example ids and its file bytes. If it fails, revert the change. Never
+  re-pin (`uv run python -m tests.test_study_freeze --write`) without the author's
+  approval. Analysis-only code (metrics, guarantees, judge, report) may change freely.
 
 **CI gate and decision changelog (M6)**
 - Inspired by Self-Improvement Memory (arXiv 2611.18856). Every run appends an entry
