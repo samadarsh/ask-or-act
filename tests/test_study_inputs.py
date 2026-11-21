@@ -175,3 +175,12 @@ def test_main_identity_ignores_only_sample_settings() -> None:
     assert make("openai/gpt-oss-120b", Recorder([]), sc)._main_identity() == base
     other = make("openai/gpt-oss-120b", Recorder([]), {"reasoning_effort": "low"})
     assert other._main_identity() != base
+
+
+def test_input_overhead_is_estimate_only() -> None:
+    plain = make("openai/gpt-oss-120b", Recorder([]), {"response_format": "json_object"})
+    params = {"response_format": "json_object", "input_overhead_tokens": 97}
+    padded = make("openai/gpt-oss-120b", Recorder([]), params)
+    exs = [Example("test:0", "where is my card", BANK, "card_arrival").public()]
+    assert padded.estimate(exs).input_tokens == plain.estimate(exs).input_tokens + 97
+    assert padded.config == plain.config  # same cache key: the call is the same

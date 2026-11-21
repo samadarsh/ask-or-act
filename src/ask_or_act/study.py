@@ -83,6 +83,94 @@ def _runs_of(cfg: RunConfig) -> list[dict[str, Any]]:
     return metas
 
 
+# Stop rule approved 2026-11-21: if a model's invalid-output rate goes above 2%, its
+# queue stops (and stays stopped on later days) until the author decides.
+INVALID_LIMIT = 0.02
+_INVALID_PREFIXES = ("invalid output", "invalid answer")
+
+
+@dataclass
+class OutputStats:
+    """Model outputs in this schedule's runs, each counted once, and how many were
+    invalid (failed the provider's JSON validation, or an answer not among the
+    options). Main answers and self-consistency samples both count."""
+
+    outputs: int = 0
+    invalid: int = 0
+    invalid_main: int = 0
+    invalid_samples: int = 0
+
+    @property
+    def rate(self) -> float:
+        return self.invalid / self.outputs if self.outputs else 0.0
+
+    @property
+    def over_limit(self) -> bool:
+        return self.rate > INVALID_LIMIT
+
+    def text(self) -> str:
+        flag = f" — ABOVE THE {INVALID_LIMIT:.0%} LIMIT" if self.over_limit else ""
+        return (
+            f"invalid outputs {self.invalid}/{self.outputs} ({self.rate:.1%}; main "
+            f"{self.invalid_main}, samples {self.invalid_samples}){flag}"
+        )
+
+
+def _latest_run_dir(cfg: RunConfig) -> Path | None:
+    if not cfg.runs_dir.exists():
+        return None
+    dirs = [
+        d.parent
+        for d in sorted(cfg.runs_dir.glob(f"*-{cfg.name}-*/run.json"))
+        if json.loads(d.read_text()).get("name") == cfg.name
+    ]
+    return dirs[-1] if dirs else None  # run ids start with the UTC start time
+
+
+def output_stats(items: Sequence[tuple[Path, RunConfig]]) -> OutputStats:
+    """Count outputs across the latest run of each config. A run's decisions include
+    cached copies of earlier answers (and, on MT-Bench, shared answers to identical
+    inputs), so successful outputs are keyed by the provider's response id; failed
+    generations (no response) by config, example and position."""
+    seen: set[str] = set()
+    st = OutputStats()
+
+    def count(key: str, invalid: bool, kind: str) -> None:
+        if key in seen:
+            return
+        seen.add(key)
+        st.outputs += 1
+        if invalid:
+            st.invalid += 1
+            if kind == "main":
+                st.invalid_main += 1
+            else:
+                st.invalid_samples += 1
+
+    for _, cfg in items:
+        run_dir = _latest_run_dir(cfg)
+        if run_dir is None:
+            continue
+        for line in (run_dir / "decisions.jsonl").read_text().splitlines():
+            d = json.loads(line)
+            raw = d.get("raw") or {}
+            error = str(d.get("error") or "")
+            main = raw.get("main") or {}
+            # A reused main call (main_cached) carries the same response id as where it
+            # was made, so the id alone prevents double counting.
+            if main.get("id") or error.startswith(_INVALID_PREFIXES):
+                key = main.get("id") or f"{cfg.name}:{d['example_id']}:main"
+                count(str(key), error.startswith(_INVALID_PREFIXES), "main")
+            for i, sample in enumerate(raw.get("samples") or []):
+                sraw = sample.get("raw") or {}
+                failed_generation = "failed_generation" in sraw or "failed_generation_chars" in sraw
+                if not (sraw.get("id") or failed_generation):
+                    continue  # e.g. a rate-limit failure: no model output
+                key = sraw.get("id") or f"{cfg.name}:{d['example_id']}:sample{i}"
+                count(str(key), sample.get("answer") is None, "sample")
+    return st
+
+
 def is_complete(cfg: RunConfig) -> bool:
     return any(
         m.get("status") == "completed" and m["config"]["sha256"] == cfg.sha256
@@ -107,6 +195,7 @@ class ModelStatus:
     requests_per_day: int | None = None
     tokens_per_day: int | None = None
     configs_left: list[str] = field(default_factory=list)
+    outputs: OutputStats = field(default_factory=OutputStats)
 
     def days_left(self, share: float) -> float | None:
         if self.calls_left == 0:
@@ -157,6 +246,7 @@ def model_status(
 
     st = ModelStatus(model)
     st.requests_today, st.tokens_today, st.provider_remaining = today
+    st.outputs = output_stats(items)
     planned: set[str] = set()  # main calls an earlier config in this queue will make
     for path, cfg in items:
         st.requests_per_day = st.requests_per_day or cfg.execution.requests_per_day
@@ -206,6 +296,7 @@ def status(
             f"~{st.calls_left:,} calls, ~{st.tokens_left:,} tokens"
             + ("" if days is None else f" = ~{math.ceil(days * 10) / 10:.1f} day(s)")
         )
+        out(f"    {st.outputs.text()}")
         if st.configs_left:
             out(f"    next: {', '.join(st.configs_left[:4])}{' ...' * (len(st.configs_left) > 4)}")
     return rows
@@ -221,13 +312,28 @@ def _run_queue(
 ) -> str:
     from ask_or_act.run import run_from_config
 
+    def over_limit() -> str | None:
+        stats = output_stats(items)
+        if stats.over_limit:
+            return (
+                f"STOPPED: {stats.text()}. Not continuing this model until you decide "
+                "(see docs/study.md)"
+            )
+        return None
+
     for path, cfg in items:
         if is_complete(cfg):
             continue
+        stop = over_limit()  # checked before every config, so a stop holds on later days
+        if stop:
+            return stop
         say(f"--- {path}")
         result = run_from_config(
             path, raw_dir=raw_dir, approve_spend=approve, out=say, transport=transport
         )
+        stop = over_limit()
+        if stop:
+            return stop
         if result.exit_code == EXIT_QUOTA:
             return f"daily limit reached during {path.stem}; continue tomorrow"
         if result.exit_code != EXIT_OK:

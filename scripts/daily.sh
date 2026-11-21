@@ -20,5 +20,7 @@ read -r -p "Run today's calls for $schedule? [y/N] " answer
 
 mkdir -p logs
 log="logs/$(date -u +%Y%m%dT%H%M%SZ)-$(basename "$schedule" .toml).log"
-uv run --env-file .env ask-or-act study run "$schedule" --yes 2>&1 | tee "$log"
+# Unbuffered, so an interrupted session still leaves its output in the log
+# (the first 2026-11-21 pilot session's log was empty because Python buffered it).
+PYTHONUNBUFFERED=1 uv run --env-file .env ask-or-act study run "$schedule" --yes 2>&1 | tee "$log"
 echo "log: $log (check with: uv run ask-or-act audit-redaction runs .cache logs)"

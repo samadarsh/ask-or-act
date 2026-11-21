@@ -32,6 +32,13 @@ class Model:
     execution: str
     datasets: tuple[str, ...]
     sample_temperature: float = 1.0
+    dataset_params: dict[str, dict[str, object]] | None = None  # per-dataset extras
+
+
+# Plan changes approved 2026-11-21 after the pilot (docs/study.md):
+# gpt-oss on Banking77 uses json_object (answer schema not in the prompt: 640 vs 1,060
+# input tokens, 0/20 invalid); the estimator adds the ~97 tokens Groq adds per call.
+GPT_OSS_BANKING77 = {"banking77": {"response_format": "json_object", "input_overhead_tokens": 97}}
 
 
 FAST = """max_concurrency = 2
@@ -57,17 +64,19 @@ MODELS = (
         "openai/gpt-oss-120b",
         "gpt-oss-120b",
         GPT_OSS,
-        {"banking77": 50, "aegis": 60, "mt_bench": 150},
+        {"banking77": 50, "aegis": 45, "mt_bench": 85},  # pilot: 41 / 44 / 84 measured
         FAST,
         ("banking77", "aegis", "mt_bench"),
+        dataset_params=GPT_OSS_BANKING77,
     ),
     Model(
         "qwen/qwen3.8-27b",
         "qwen3.8-27b",
         {"tier": "free", "temperature": 0.0, "reasoning_effort": "none", "max_output_tokens": 256},
-        {"banking77": 20, "aegis": 20, "mt_bench": 25},
+        {"banking77": 20, "aegis": 15, "mt_bench": 16},  # pilot: 17 / 15 / 15 measured
         FAST,
         ("banking77", "aegis", "mt_bench"),
+        sample_temperature=0.7,  # pilot: 0/60 failed samples at 0.7 vs 18% at 1.0
     ),
     Model(
         "openai/gpt-oss-safeguard-20b",
@@ -81,9 +90,10 @@ MODELS = (
         "openai/gpt-oss-20b",
         "gpt-oss-20b",
         GPT_OSS,
-        {"banking77": 50, "aegis": 60},
+        {"banking77": 50, "aegis": 45},
         FAST,
         ("banking77", "aegis"),
+        dataset_params=GPT_OSS_BANKING77,
     ),
 )
 
@@ -219,7 +229,11 @@ def study() -> None:
     for m in MODELS:
         for ds in m.datasets:
             main_subset, sc_subset = SUBSETS[ds]
-            base = {**m.params, "expected_output_tokens": m.expected_out[ds]}
+            base = {
+                **m.params,
+                **(m.dataset_params or {}).get(ds, {}),
+                "expected_output_tokens": m.expected_out[ds],
+            }
             # Main calls on both halves first, then self-consistency (which reuses them).
             for sc in (False, True):
                 for split in ("calibration", "test"):
@@ -336,4 +350,9 @@ def pilot() -> None:
 
 if __name__ == "__main__":
     study()
-    pilot()
+    # The pilot configs are the record of what ran on 2026-11-21: never regenerated.
+    # `--pilot` rewrites them only for a new, separately documented pilot.
+    import sys
+
+    if "--pilot" in sys.argv:
+        pilot()

@@ -5,6 +5,7 @@ After the approved smoke test they are joined by sanitized real recordings, with
 text removed. No test ever opens a network connection: MockTransport answers in-process.
 """
 
+import itertools
 import json
 import math
 from collections.abc import Callable, Sequence
@@ -13,6 +14,7 @@ from typing import Any
 import httpx
 
 Handler = Callable[[httpx.Request], httpx.Response]
+_IDS = itertools.count()
 
 
 def openai_response(
@@ -178,7 +180,7 @@ def groq_response(
     if reasoning is not None:
         message["reasoning"] = reasoning
     return {
-        "id": "chatcmpl-test",
+        "id": f"chatcmpl-test-{next(_IDS)}",  # unique, like real Groq ids
         "object": "chat.completion",
         "created": 1_790_000_000,
         "model": model,

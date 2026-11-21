@@ -1,0 +1,99 @@
+{
+  "description": "Test-half examples seen before the study's settings were final: the 2026-11-20 smoke runs and the 2026-11-21 pilot (UTC). Final test results are also reported without them, as a pre-registered sensitivity check (docs/study.md). IDs only, no text.",
+  "datasets": {
+    "aegis": {
+      "n": 20,
+      "ids": [
+        "0191ab3f7ec14db9a5d65e832c83792a",
+        "075a701d07694625886321ae330c9067",
+        "0e9217f0d2594600a7e80f3d7bb1a027",
+        "201e8989e3ac4ebf9b071cfb3ff851d0",
+        "346eca2afcf745b084fea859b624184e",
+        "44f30558d20f49899b23f996e18acdf9",
+        "4ae26a8da0d9409d8466db7d67bc0e98",
+        "659ffde690c4430185b701e37cfaa3e2",
+        "71b94fd0a9074dde9ba9a1f43ba6b4dc",
+        "832ff4cccf01451ab8a8bcf5fc6fd49a",
+        "8c1a061b3c104933856e1d47fca2fd38",
+        "939cf7920a334daabc701431bb1df7bc",
+        "b653245b36bc44c9b238929482fddf09",
+        "b9bb81c3e88a4e22b7c3348f93c4d5ff",
+        "ca7c6e96d6554fd6a38ec8798b05055a",
+        "cae08b95fb4f489387f2b9f206c865df",
+        "d451d4afb3114fa6a220d98cafbe739d",
+        "da5e5e93e42b405aaef82be085600bde",
+        "dcaf3cfee4694d64bc24688f002275b1",
+        "e1560fd8cb7940418a7a8c3e2b17717e"
+      ],
+      "runs": [
+        "20261120T080658Z-smoke-groq-safeguard-20b-aegis-101433",
+        "20261121T193955Z-pilot-p8-qwen3.8-27b-aegis-b32d09",
+        "20261121T194817Z-pilot-p7-gpt-oss-120b-aegis-ba0ca9"
+      ]
+    },
+    "banking77": {
+      "n": 20,
+      "ids": [
+        "test:1126",
+        "test:1660",
+        "test:1671",
+        "test:1673",
+        "test:1881",
+        "test:1883",
+        "test:2164",
+        "test:2168",
+        "test:2181",
+        "test:2184",
+        "test:2420",
+        "test:2428",
+        "test:2808",
+        "test:2827",
+        "test:2836",
+        "test:2962",
+        "test:2994",
+        "test:2995",
+        "test:868",
+        "test:877"
+      ],
+      "runs": [
+        "20261120T080658Z-smoke-groq-gpt-oss-120b-banking77-a87951",
+        "20261120T080658Z-smoke-groq-qwen3.8-27b-banking77-73dfd0",
+        "20261120T082733Z-smoke-groq-qwen3.8-27b-banking77-cb7b47",
+        "20261121T192102Z-pilot-p1-gpt-oss-120b-banking77-json-object-923631",
+        "20261121T193527Z-pilot-p1-gpt-oss-120b-banking77-json-object-104f25",
+        "20261121T193527Z-pilot-p2-gpt-oss-120b-banking77-variation-d28ff5",
+        "20261121T193527Z-pilot-p3-qwen3.8-27b-banking77-temp07-e16abd",
+        "20261121T193527Z-pilot-p4-gpt-oss-20b-banking77-db0a4e"
+      ]
+    },
+    "mt_bench": {
+      "n": 20,
+      "ids": [
+        "human:1297",
+        "human:1333",
+        "human:1370",
+        "human:1694",
+        "human:1743",
+        "human:1812",
+        "human:1946",
+        "human:1973",
+        "human:2063",
+        "human:2253",
+        "human:2491",
+        "human:2533",
+        "human:2551",
+        "human:2554",
+        "human:3090",
+        "human:3335",
+        "human:3349",
+        "human:408",
+        "human:47",
+        "human:71"
+      ],
+      "runs": [
+        "20261121T193724Z-pilot-p6-qwen3.8-27b-mt_bench-6cf8ce",
+        "20261121T194520Z-pilot-p5-gpt-oss-120b-mt_bench-bb3da0"
+      ]
+    }
+  }
+}

@@ -18,6 +18,8 @@ tier = "free"
 temperature = 0.0
 reasoning_effort = "low"
 max_output_tokens = 1024
+response_format = "json_object"
+input_overhead_tokens = 97
 expected_output_tokens = 50
 
 [execution]

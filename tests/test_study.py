@@ -111,3 +111,31 @@ def test_study_run_needs_yes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     sched = schedule(tmp_path, [groq_cfg(tmp_path, manifest_path, "main")])
     assert main(["study", "run", str(sched), "--raw-dir", str(tmp_path)]) == 3
     assert main(["study", "status", str(sched), "--raw-dir", str(tmp_path)]) == 0
+
+
+def test_invalid_output_rate_above_2_percent_stops_that_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest_path = write_world(tmp_path, monkeypatch)  # 6 test examples
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test")
+    first = groq_cfg(tmp_path, manifest_path, "first")
+    second = groq_cfg(
+        tmp_path, manifest_path, "second", 'samples = 1\nconfidence_signal = "self_consistency"'
+    )
+    sched = load_schedule(schedule(tmp_path, [first, second]))
+    # One answer of six is not an option: 1/6 = 17% > 2%.
+    day1 = Recorder(
+        [groq_ok("card_arrival", 80) for _ in range(5)] + [groq_ok("not_an_intent", 80)]
+    )
+    lines: list[str] = []
+    assert run(sched, tmp_path, approve=True, out=lines.append, transport=day1.transport) == 1
+    text = "\n".join(lines)
+    assert "STOPPED: invalid outputs 1/6 (16.7%; main 1, samples 0)" in text
+    assert "ABOVE THE 2% LIMIT" in text
+    assert "--- " + str(second) not in text  # the next config did not start
+    # The stop holds on later days: nothing is called.
+    day2 = Recorder([])
+    lines.clear()
+    assert run(sched, tmp_path, approve=True, out=lines.append, transport=day2.transport) == 1
+    assert day2.requests == []
+    assert "STOPPED: invalid outputs" in "\n".join(lines)

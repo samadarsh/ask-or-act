@@ -49,14 +49,85 @@ uv run ask-or-act audit-redaction              # after each day
 | Aegis | 250 (safe/unsafe in proportion) | 100 | gpt-oss-120b, qwen3.8-27b, gpt-oss-20b, gpt-oss-safeguard-20b |
 | MT-Bench | the full half: all 40 questions, 500 votes (decided 2026-11-21) | ≥ 50 votes, whole questions | gpt-oss-120b, qwen3.8-27b |
 
-## Projected schedule (2026-11-21, before the pilot; at 90% of the daily limits)
+## Pilot (day 1, 2026-11-21 UTC) and the plan changes it led to
 
-| model | calls | tokens | days |
+The pilot ran 20 test examples per dataset (`configs/pilot/`, kept as the record of
+what ran; the generator no longer rewrites them). Approved changes for days 2+:
+
+1. **gpt-oss-120b and gpt-oss-20b on Banking77 use `response_format = "json_object"`**
+   (main and self-consistency). The 78-option answer schema is then not written into
+   the prompt: 640 instead of 1,060 input tokens per call. In the pilot, 0/20 answers
+   were invalid and 19/20 matched the strict-schema answers. The server no longer
+   validates the label, so invalid answers are monitored (below).
+2. **qwen3.8-27b samples at temperature 0.7** (0/60 failed samples, against 17/95 at 1.0).
+3. **Expected output tokens from the pilot:** gpt-oss Aegis 45, gpt-oss-120b MT-Bench 85,
+   qwen Aegis 15, qwen MT-Bench 16.
+4. **`input_overhead_tokens = 97`** for the json_object configs: an estimate-only
+   setting (not in the cache key) for the tokens Groq adds per call in that mode.
+5. **Self-consistency stays k = 3 with shuffled + reworded prompts**, as designed. Not
+   re-tuned on 20 examples.
+6. **`scripts/daily.sh` runs unbuffered**, so an interrupted session still leaves a log.
+
+None of these touch the frozen guarantee settings (docs/guarantees.md).
+
+## Invalid-output stop rule (approved 2026-11-21 UTC)
+
+- Every `study status` / `study run` summary shows, per model:
+
+  `invalid outputs X/Y (Z%; main a, samples b)`
+
+  It counts every model output in the schedule's runs once: main answers and
+  self-consistency samples, by provider response id. An invalid output is one that
+  failed the provider's JSON validation, or an answer that isn't one of the options.
+- **If a model goes above 2%,** its queue stops with "STOPPED: … ABOVE THE 2% LIMIT".
+  It is checked before and after each config, so the stop holds on later days, and
+  that model makes no further calls until the author decides. The other models
+  continue.
+
+## Reporting rule for test results (pre-registered 2026-11-21 UTC, before day 2)
+
+The pilot and the smoke runs looked at 20 test-half examples per dataset, and two
+settings were chosen from them (json_object for gpt-oss on Banking77, qwen's sample
+temperature). So every final **test-half** result is reported twice:
+
+- **Primary:** the full test half, as planned.
+- **Sensitivity check:** the test half **excluding the seen examples**. Their ids are
+  listed in [`configs/pilot/seen_test_ids.json`](../configs/pilot/seen_test_ids.json):
+  20 per dataset, the same 20 in every smoke and pilot run. For MT-Bench's
+  per-comparison analysis, every comparison that contains a seen vote is excluded:
+  20 comparisons, 48 test votes.
+
+The calibration half was never used in the smoke or pilot runs, so thresholds are fit
+on untouched data. Banking77's target registration came ~7 minutes after the first
+Banking77 pilot calls; this is disclosed in docs/guarantees.md and is not changed.
+
+## Approved schedule (2026-11-21 UTC; measured tokens, 90% of each model's limits)
+
+Day 1 was the pilot. Each day: run `scripts/daily.sh` once after the quota resets.
+(cal = calibration half; SC = the self-consistency configs; ✓ = that model is done.)
+
+| day | gpt-oss-120b | qwen3.8-27b | gpt-oss-20b | safeguard-20b |
+|---|---|---|---|---|
+| 2 | B77 cal | B77 cal | B77 cal | Aegis cal + test |
+| 3 | B77 cal → test | B77 test | B77 cal → test | Aegis test + cal-SC |
+| 4 | B77 test + cal-SC | B77 SC | B77 test + cal-SC | Aegis test-SC ✓ |
+| 5 | B77 SC → Aegis cal | B77 SC + Aegis cal/test | B77 SC | |
+| 6 | Aegis cal + test | Aegis test + SC | Aegis cal + test | |
+| 7 | Aegis test + SC | MT cal | Aegis SC | |
+| 8 | Aegis SC + MT cal | MT cal → test | Aegis SC ✓ | |
+| 9 | MT cal | MT test | | |
+| 10 | MT cal → test | MT test + SC | | |
+| 11 | MT test | MT SC ✓ | | |
+| 12 | MT test + SC | | | |
+| 13 | MT SC ✓ | | | |
+
+| model | calls | tokens | quota-days |
 |---|---|---|---|
-| gpt-oss-120b | ~3,150 | ~2.65M | ~14.7 (≈ 12 if the pilot shows `json_object` keeps Banking77 answers valid) |
-| qwen3.8-27b | ~3,130 | ~1.78M | ~9.9 |
-| gpt-oss-20b | ~2,180 | ~1.53M | ~8.5 |
-| gpt-oss-safeguard-20b | ~1,100 | ~0.36M | ~2.1 |
+| gpt-oss-120b | 3,069 | 2.11M | 11.7 |
+| qwen3.8-27b | 3,072 | 1.73M | 9.6 |
+| gpt-oss-20b | 2,134 | 1.17M | 6.5 |
+| gpt-oss-safeguard-20b | 1,100 | 0.49M | 2.8 |
 
-The models run in parallel, so the study takes as long as the slowest: gpt-oss-120b.
-`ask-or-act study status` gives the live figures.
+The models run in parallel, so gpt-oss-120b sets the length. The daily limit stops
+each model wherever it is, and the next day continues from the cache, so the table is a
+forecast, not a rule. `ask-or-act study status` gives the live figures.

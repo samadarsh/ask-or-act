@@ -209,6 +209,11 @@ All four must pass before a change is done.
   `[guarantee]` table. Future work: a class-conditional Aegis target on missed unsafe.
   Banking77's came 7 min after the first Banking77 pilot calls (docs/guarantees.md).
 - **Dates are UTC everywhere.** A registration's date is its commit's UTC date.
+- **Study (docs/study.md):** after the pilot, gpt-oss uses json_object on Banking77 and
+  qwen samples at 0.7. A model whose invalid-output rate goes above 2% stops; tell the
+  author. Test results are reported on the full test half (primary) and without the
+  seen ids in `configs/pilot/seen_test_ids.json` (sensitivity). Pilot configs are a
+  record: never regenerate them.
 
 **CI gate and decision changelog (M6)**
 - Inspired by Self-Improvement Memory (arXiv 2611.18856). Every run appends an entry

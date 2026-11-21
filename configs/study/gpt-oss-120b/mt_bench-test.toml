@@ -18,7 +18,7 @@ tier = "free"
 temperature = 0.0
 reasoning_effort = "low"
 max_output_tokens = 1024
-expected_output_tokens = 150
+expected_output_tokens = 85
 
 [execution]
 max_concurrency = 2

@@ -468,6 +468,7 @@ KNOWN_PARAMS = frozenset(
         "other_option",
         "chars_per_token",
         "expected_output_tokens",
+        "input_overhead_tokens",
         "sample_variation",
         "system_prompt",
         "tier",
@@ -531,6 +532,10 @@ class PromptedLLMDecider:
         self.other = bool(p.get("other_option", False))
         self.chars_per_token = float(str(p.get("chars_per_token", 4.0)))
         self.expected_output_tokens = int(str(p.get("expected_output_tokens", 40)))
+        # Estimate-only, like chars_per_token: tokens the provider adds to each prompt
+        # beyond our text (measured 2026-11-21: ~97 for gpt-oss in json_object mode).
+        # Not part of the resolved config, so it never changes a cache key.
+        self.input_overhead_tokens = int(str(p.get("input_overhead_tokens", 0)))
         self.price: Price = price_for(config.model)
         self.tier = str(p.get("tier", provider.default_tier))
         if self.tier not in ("paid", "free"):
@@ -597,7 +602,7 @@ class PromptedLLMDecider:
                 chars += len(json.dumps(answer_schema(options)))  # as measured
             n = self._uncached_calls(ex)
             calls += n
-            tokens_in += (int(chars / self.chars_per_token) + 1) * n
+            tokens_in += (int(chars / self.chars_per_token) + 1 + self.input_overhead_tokens) * n
         tokens_out = calls * self.expected_output_tokens
         list_usd = self.price.pricing.cost(tokens_in, tokens_out)
         charged = 0.0 if self.tier == "free" else list_usd
@@ -632,7 +637,12 @@ class PromptedLLMDecider:
             chars = len(user) + len(sys_msg or "")
             if schema_too and self.response_format not in ("json_object", "none"):
                 chars += len(json.dumps(answer_schema(options)))
-            tokens = int(chars / self.chars_per_token) + 1 + self.expected_output_tokens
+            tokens = (
+                int(chars / self.chars_per_token)
+                + 1
+                + self.input_overhead_tokens
+                + self.expected_output_tokens
+            )
             out[cache_key(identity, ex, self.MAIN_EXTRA)] = tokens
         return out
 
@@ -677,7 +687,12 @@ class PromptedLLMDecider:
             "none",
         ):
             chars += len(json.dumps(spec.schema))
-        return int(chars / self.chars_per_token) + 1 + self.expected_output_tokens
+        return (
+            int(chars / self.chars_per_token)
+            + 1
+            + self.input_overhead_tokens
+            + self.expected_output_tokens
+        )
 
     async def _call(self, spec: CallSpec) -> Completion:
         key = api_key(self.ctx.env, self.provider.key_env)
