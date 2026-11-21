@@ -41,6 +41,27 @@ def run_params(record: RunRecord) -> dict[str, object]:
     return _table(_table(_table(contents, "contents"), "decider"), "params")
 
 
+@dataclass(frozen=True)
+class Registered:
+    alpha: float | None
+    delta: float | None
+    registered: str | None
+
+
+def run_guarantee(record: RunRecord) -> Registered | None:
+    """The ``[guarantee]`` table of the config saved in run.json, if any."""
+    g = _table(_table(_table(record.metadata, "config"), "contents"), "guarantee")
+    if not g:
+        return None
+
+    def num(key: str) -> float | None:
+        v = g.get(key)
+        return float(v) if isinstance(v, int | float) and not isinstance(v, bool) else None
+
+    reg = g.get("registered")
+    return Registered(num("alpha"), num("delta"), reg if isinstance(reg, str) else None)
+
+
 def run_split(record: RunRecord) -> str | None:
     split = _table(record.metadata, "dataset").get("split")
     return split if isinstance(split, str) else None

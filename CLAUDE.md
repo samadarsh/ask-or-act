@@ -203,6 +203,8 @@ All four must pass before a change is done.
 - **Pre-registered and FROZEN (2026-11-21):** the grid, scan starts, δ split and the
   MT-Bench unit/tie rule (docs/guarantees.md). They were chosen on the free baselines and
   fakes only. Never change them after seeing LLM results.
+- **MT-Bench target pre-registered (2026-11-22): α = 0.25, δ = 0.1**, in each MT-Bench
+  config's `[guarantee]` table. `--alpha-vs-human` is a sensitivity analysis only.
 
 **CI gate and decision changelog (M6)**
 - Inspired by Self-Improvement Memory (arXiv 2611.18856). Every run appends an entry

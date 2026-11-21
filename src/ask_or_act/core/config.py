@@ -45,6 +45,20 @@ class DatasetConfig:
 
 
 @dataclass(frozen=True)
+class GuaranteeConfig:
+    """Optional ``[guarantee]``: the pre-registered target for `ask-or-act thresholds`.
+
+    Written into the config *before* any results exist, so the target can't be tuned
+    to the data. `ask-or-act thresholds` uses it when ``--alpha`` / ``--delta`` are not
+    given, and labels any other value as not pre-registered."""
+
+    alpha: float | None = None
+    delta: float | None = None
+    registered: str | None = None  # date the target was fixed, e.g. "2026-11-22"
+    note: str | None = None
+
+
+@dataclass(frozen=True)
 class RunConfig:
     name: str
     dataset: DatasetConfig
@@ -55,6 +69,7 @@ class RunConfig:
     runs_dir: Path
     raw: dict[str, JSON]  # the parsed file, saved verbatim in run metadata
     sha256: str  # hash of the parsed file contents
+    guarantee: GuaranteeConfig = GuaranteeConfig()
 
 
 class _Table:
@@ -175,6 +190,20 @@ def parse_config(data: dict[str, Any]) -> RunConfig:
     out = top.table("output")
     runs_dir = Path(out.get("runs_dir", str, "runs"))
     out.finish()
+
+    gt = top.table("guarantee")
+    g_alpha: float | None = gt.get("alpha", number, None)
+    g_delta: float | None = gt.get("delta", number, None)
+    for key, value in (("alpha", g_alpha), ("delta", g_delta)):
+        if value is not None and not 0.0 < float(value) < 1.0:
+            raise ConfigError(f"[guarantee] {key} must be in (0, 1)")
+    guarantee = GuaranteeConfig(
+        None if g_alpha is None else float(g_alpha),
+        None if g_delta is None else float(g_delta),
+        gt.get("registered", str, None),
+        gt.get("note", str, None),
+    )
+    gt.finish()
     top.finish()
 
     return RunConfig(
@@ -187,6 +216,7 @@ def parse_config(data: dict[str, Any]) -> RunConfig:
         runs_dir=runs_dir,
         raw=cast(dict[str, JSON], data),
         sha256=sha256_hex(data),
+        guarantee=guarantee,
     )
 
 

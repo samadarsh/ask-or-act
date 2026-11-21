@@ -319,3 +319,45 @@ def test_human_ceiling_is_leave_one_out() -> None:
     # Votes 1 and 2: others are {x, y}: no majority, skipped. Vote 3: others {x, x}: x ≠ y.
     assert (h.n_votes_used, h.rate, h.n_votes) == (1, 0.0, 4)
     assert h.alpha == 1.0
+
+
+# ------------------------------------------- pre-registered target ([guarantee])
+
+
+def test_guarantee_table_parses_and_validates() -> None:
+    from ask_or_act.core.config import ConfigError, parse_config
+
+    base = {
+        "name": "x",
+        "dataset": {"manifest": "m.json"},
+        "decider": {"type": "fake", "model": "m"},
+        "budget": {"max_usd": 0.0},
+    }
+    cfg = parse_config({**base, "guarantee": {"alpha": 0.25, "delta": 0.1, "registered": "d"}})
+    assert (cfg.guarantee.alpha, cfg.guarantee.delta, cfg.guarantee.registered) == (
+        0.25,
+        0.1,
+        "d",
+    )
+    assert parse_config(base).guarantee.alpha is None
+    with pytest.raises(ConfigError, match="alpha must be in"):
+        parse_config({**base, "guarantee": {"alpha": 1.5}})
+    with pytest.raises(ConfigError, match="unknown keys"):
+        parse_config({**base, "guarantee": {"target": 0.2}})
+
+
+def test_thresholds_cli_uses_the_preregistered_alpha(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    manifest_path = write_world(tmp_path, monkeypatch)
+    cfg = write_config(tmp_path, manifest_path)
+    text = cfg.read_text().replace('split = "test"', 'split = "calibration"')
+    cfg.write_text(text + '\n[guarantee]\nalpha = 0.2\ndelta = 0.05\nregistered = "2026-11-22"\n')
+    result = run_from_config(cfg, raw_dir=tmp_path, out=lambda _: None)
+    assert result.run_dir is not None
+    assert main(["thresholds", "--cal", str(result.run_dir)]) == 0
+    out = capsys.readouterr().out
+    assert "target α = 0.2: pre-registered in the run config, registered 2026-11-22" in out
+    assert "risk ≤ 0.2 on acted-on examples with probability ≥ 0.950 (δ = 0.05)" in out
+    assert main(["thresholds", "--cal", str(result.run_dir), "--alpha", "0.3"]) == 0
+    assert "α = 0.3 is NOT the pre-registered target (α = 0.2" in capsys.readouterr().out

@@ -82,15 +82,18 @@ def build_parser() -> argparse.ArgumentParser:
     thr.add_argument(
         "--test", nargs="+", type=Path, help="the same deciders' test-half runs, same order"
     )
-    thr.add_argument("--alpha", type=float, help="target risk (default 0.1)")
+    thr.add_argument(
+        "--alpha",
+        type=float,
+        help="target risk (default: the run config's pre-registered [guarantee] alpha, else 0.1)",
+    )
     thr.add_argument(
         "--alpha-vs-human",
         type=float,
-        nargs="?",
-        const=0.0,
+        default=0.0,
         metavar="MARGIN",
-        help="MT-Bench: α = 1 − (how often a typical human agrees with the majority) "
-        "+ MARGIN (default 0), estimated on the calibration votes",
+        help="MT-Bench sensitivity analysis (always shown): α = 1 − h + MARGIN, h = how "
+        "often a typical human agrees with the others' majority (default MARGIN 0)",
     )
     thr.add_argument(
         "--delta-floor",
@@ -105,7 +108,9 @@ def build_parser() -> argparse.ArgumentParser:
         "shown as a sensitivity check)",
     )
     thr.add_argument(
-        "--delta", type=float, default=0.1, help="allowed failure probability (default 0.1)"
+        "--delta",
+        type=float,
+        help="allowed failure probability (default: pre-registered [guarantee] delta, else 0.1)",
     )
     thr.add_argument("--signal", help="score this recorded signal as the confidence")
     thr.add_argument(
@@ -146,7 +151,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _run_thresholds(args: argparse.Namespace) -> int:
     from ask_or_act.core.runs import load_run
-    from ask_or_act.guarantees.recommend import describe, grid_for_run, recommend, run_split
+    from ask_or_act.guarantees.recommend import (
+        describe,
+        grid_for_run,
+        recommend,
+        run_guarantee,
+        run_split,
+    )
     from ask_or_act.metrics.data import from_run
 
     if args.test and len(args.test) != len(args.cal):
@@ -154,8 +165,10 @@ def _run_thresholds(args: argparse.Namespace) -> int:
         return 2
     try:
         cal = []
+        registered = []
         for path in args.cal:
             record = load_run(path)
+            registered.append(run_guarantee(record))
             grid = grid_for_run(record, args.signal)
             if run_split(record) == "test":
                 print(f"error: {path} is a test-half run; fit on calibration", file=sys.stderr)
@@ -163,30 +176,58 @@ def _run_thresholds(args: argparse.Namespace) -> int:
             name = str(record.metadata.get("name", path.name))
             cal.append((name, from_run(record, args.signal), grid))
         test = [from_run(load_run(p), args.signal) for p in args.test] if args.test else None
-        if args.alpha is not None and args.alpha_vs_human is not None:
-            raise ValueError("give --alpha or --alpha-vs-human, not both")
-        alpha = 0.1 if args.alpha is None and args.alpha_vs_human is None else args.alpha
-        kw = {
-            "alpha": alpha,
-            "delta": args.delta,
-            "delta_floor": args.delta_floor,
-            "disjoint": args.disjoint,
-            "alpha_vs_human": args.alpha_vs_human,
-        }
-        rec = recommend(cal, test, mt_bench_unit=args.mt_bench_unit, **kw)
-        other = None
+        pre = registered[0]
+        if any(r != pre for r in registered[1:]):
+            raise ValueError("the --cal runs pre-register different [guarantee] targets")
+        notes = []
+        alpha, delta = args.alpha, args.delta
+        if pre is not None and pre.alpha is not None:
+            when = f", registered {pre.registered}" if pre.registered else ""
+            if alpha is None:
+                alpha = pre.alpha
+                notes.append(f"target α = {alpha:g}: pre-registered in the run config{when}")
+            elif alpha != pre.alpha:
+                notes.append(
+                    f"NOTE: α = {alpha:g} is NOT the pre-registered target "
+                    f"(α = {pre.alpha:g}{when}); treat this as exploratory"
+                )
+        if pre is not None and pre.delta is not None and delta is None:
+            delta = pre.delta
+        alpha = 0.1 if alpha is None else alpha
+        delta = 0.1 if delta is None else delta
+        kw = {"delta": delta, "delta_floor": args.delta_floor, "disjoint": args.disjoint}
+        rec = recommend(cal, test, alpha=alpha, mt_bench_unit=args.mt_bench_unit, **kw)
+        extra = []
         if rec.dataset == "mt_bench":
             flip = "vote" if args.mt_bench_unit == "comparison" else "comparison"
-            other = recommend(cal, test, mt_bench_unit=flip, **kw)
+            label = "sensitivity" if flip == "vote" else "pre-registered unit"
+            extra.append(
+                (
+                    f"{label}: MT-Bench per {flip}, same α",
+                    recommend(cal, test, alpha=alpha, mt_bench_unit=flip, **kw),
+                )
+            )
+            extra.append(
+                (
+                    "sensitivity: α relative to the human ceiling (not the registered target)",
+                    recommend(
+                        cal,
+                        test,
+                        alpha=None,
+                        alpha_vs_human=args.alpha_vs_human,
+                        mt_bench_unit=args.mt_bench_unit,
+                        **kw,
+                    ),
+                )
+            )
     except (FileNotFoundError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    for line in describe(rec):
+    for line in [*notes, *describe(rec)]:
         print(line)
-    if other is not None:
-        label = "sensitivity" if other.unit == "vote" else "pre-registered unit"
-        print(f"\n--- {label}: MT-Bench per {other.unit}")
-        for line in describe(other):
+    for title, r in extra:
+        print(f"\n--- {title}")
+        for line in describe(r):
             print(line)
     return 0
 

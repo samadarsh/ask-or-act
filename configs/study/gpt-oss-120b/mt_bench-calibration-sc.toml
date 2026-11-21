@@ -43,3 +43,13 @@ path = ".cache/decisions.sqlite"
 
 [output]
 runs_dir = "runs"
+
+[guarantee]
+# PRE-REGISTERED 2026-11-22, before any LLM data on MT-Bench existed (docs/guarantees.md).
+# alpha = 0.25 is roughly the human ceiling: a typical human agrees with the other
+# voters' majority 74.6% of the time on the calibration half. Do not change after
+# seeing results; --alpha-vs-human is reported as a sensitivity analysis only.
+alpha = 0.25
+delta = 0.1
+registered = "2026-11-22"
+note = "MT-Bench: risk <= 0.25 vs the per-comparison majority human label"

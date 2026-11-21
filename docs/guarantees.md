@@ -18,6 +18,7 @@ change would mean a new, separately registered analysis. `tests/test_guarantees.
 | test | exact binomial, ToE Eq. (4); stop at the first failure |
 | MT-Bench unit | one example per comparison with the majority human label (below) |
 | MT-Bench ties | no strict plurality → comparison excluded and counted |
+| MT-Bench target | **α = 0.25, δ = 0.1**, registered 2026-11-22 (see below) |
 
 A consequence we accept: a decider whose confidence never reaches 0.9 (the classic
 MT-Bench baseline tops out at 0.71) can never be certified.
@@ -36,12 +37,18 @@ uv run ask-or-act thresholds --cal runs/<cheap-cal> runs/<strong-cal> --test run
   - *escalate*: send it to a human.
 - **The guarantee:** with probability ≥ 1 − δ over the calibration half, the error rate
   on acted-on examples is ≤ α, for new data from the same distribution.
-- **Human-relative target** (`--alpha-vs-human [MARGIN]`, MT-Bench): α = 1 − h + MARGIN.
-  h is how often a typical human agrees with the majority of the *other* humans on the
-  same comparison (leave-one-out, on the calibration half's votes). On the calibration
-  half h = 0.746, so α = 0.254; a fixed α = 0.1 is infeasible for everyone on MT-Bench.
-  h comes from the same calibration labels the test uses, so α depends slightly on
-  them; for a strictly pre-registered target, fix the printed α and pass `--alpha`.
+- **Pre-registered MT-Bench target: α = 0.25, δ = 0.1** (fixed 2026-11-22, before any
+  LLM data on MT-Bench existed). It is roughly the human ceiling: on the calibration
+  half a typical human agrees with the other voters' majority h = 74.6% of the time
+  (1 − h = 0.254). A fixed α = 0.1 is infeasible for everyone on MT-Bench.
+  - It is recorded in every MT-Bench run config as a `[guarantee]` table (study,
+    pilot and the classic baselines). `ask-or-act thresholds` uses it as the fixed
+    target when `--alpha` is not given. Any other `--alpha` is printed as "NOT the
+    pre-registered target; exploratory".
+  - **Sensitivity only:** `--alpha-vs-human [MARGIN]` (α = 1 − h + MARGIN, h on the
+    calibration votes) is always reported for MT-Bench, below the main result. It is
+    never the headline: h comes from the same calibration labels the test uses.
+  - Do not change α after seeing LLM results.
 
 ## Order of operations
 
