@@ -46,3 +46,12 @@ path = ".cache/decisions.sqlite"
 
 [output]
 runs_dir = "runs"
+
+[guarantee]
+# PRE-REGISTERED 2026-11-22, before the pilot or any study data (docs/guarantees.md).
+# Only the 2026-11-20 smoke runs (20 test examples) existed; alpha = 0.10 was the
+# default before them. Do not change after seeing results.
+alpha = 0.10
+delta = 0.10
+registered = "2026-11-22"
+note = "Aegis: risk <= 0.10 (wrong safe/unsafe label) on acted-on prompts"

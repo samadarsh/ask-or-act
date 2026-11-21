@@ -118,7 +118,26 @@ delta = 0.1
 registered = "2026-11-22"
 note = "MT-Bench: risk <= 0.25 vs the per-comparison majority human label"
 """
-GUARANTEE = {"mt_bench": MT_BENCH_GUARANTEE}
+
+
+def _target(dataset: str, note: str) -> str:
+    return f"""
+[guarantee]
+# PRE-REGISTERED 2026-11-22, before the pilot or any study data (docs/guarantees.md).
+# Only the 2026-11-20 smoke runs (20 test examples) existed; alpha = 0.10 was the
+# default before them. Do not change after seeing results.
+alpha = 0.10
+delta = 0.10
+registered = "2026-11-22"
+note = "{note}"
+"""
+
+
+GUARANTEE = {
+    "mt_bench": MT_BENCH_GUARANTEE,
+    "banking77": _target("banking77", "Banking77: risk <= 0.10 (wrong intent) on routed queries"),
+    "aegis": _target("aegis", "Aegis: risk <= 0.10 (wrong safe/unsafe label) on acted-on prompts"),
+}
 
 
 def toml_value(v: object) -> str:

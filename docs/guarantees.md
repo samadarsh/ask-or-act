@@ -19,6 +19,16 @@ change would mean a new, separately registered analysis. `tests/test_guarantees.
 | MT-Bench unit | one example per comparison with the majority human label (below) |
 | MT-Bench ties | no strict plurality → comparison excluded and counted |
 | MT-Bench target | **α = 0.25, δ = 0.1**, registered 2026-11-22 (see below) |
+| Banking77 target | **α = 0.10, δ = 0.10**, registered 2026-11-22 (wrong intent on routed queries) |
+| Aegis target | **α = 0.10, δ = 0.10**, registered 2026-11-22 (wrong safe/unsafe label on acted-on prompts) |
+
+**Data that existed when the targets were registered (2026-11-22).** No pilot or study
+runs. The 2026-11-20 smoke runs did exist: 20 Banking77 test examples on gpt-oss-120b
+and qwen3.8-27b, and 20 Aegis test examples on gpt-oss-safeguard-20b; their accuracy and
+ECE had been seen. α = 0.10 was the CLI default before those runs and was not tuned to
+them. Every Banking77, Aegis and MT-Bench config in `configs/study/`, `configs/pilot/`
+and `configs/baselines/` carries its `[guarantee]` table. The smoke and fake configs
+don't: they are not part of the study.
 
 A consequence we accept: a decider whose confidence never reaches 0.9 (the classic
 MT-Bench baseline tops out at 0.71) can never be certified.
@@ -138,3 +148,10 @@ keeps a warning about it.
 - **Distribution-shift warning:** compare calibration and test confidence
   distributions, which needs no labels.
 - **Cost per tier,** from `cost_usd`.
+- **A class-conditional target for Aegis (asymmetric harm).** Missing an unsafe
+  request (acting on "safe" when the human label is unsafe) is far worse than a false
+  alarm, and an overall α can hide a high miss rate. Planned: a second guarantee on
+  P(answer = safe | label = unsafe, acted on) ≤ α_miss, with its own pre-registered
+  α_miss and δ, fixed before any study data is analysed. Like a per-class
+  (Mondrian) risk, it is tested only on the unsafe calibration examples. It needs its
+  own literature check before implementation (rule 4).
