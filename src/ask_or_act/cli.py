@@ -68,6 +68,52 @@ def build_parser() -> argparse.ArgumentParser:
         help="score this recorded signal as the confidence, e.g. "
         "verbalized, token_logprob, verbalized_logprob, self_consistency, native",
     )
+    thr = sub.add_parser(
+        "thresholds",
+        help="act/ask/escalate thresholds with a risk guarantee (fit on calibration runs)",
+    )
+    thr.add_argument(
+        "--cal",
+        nargs="+",
+        type=Path,
+        required=True,
+        help="calibration-half run(s), cheapest first; 2+ runs make a cascade",
+    )
+    thr.add_argument(
+        "--test", nargs="+", type=Path, help="the same deciders' test-half runs, same order"
+    )
+    thr.add_argument("--alpha", type=float, help="target risk (default 0.1)")
+    thr.add_argument(
+        "--alpha-vs-human",
+        type=float,
+        nargs="?",
+        const=0.0,
+        metavar="MARGIN",
+        help="MT-Bench: α = 1 − (how often a typical human agrees with the majority) "
+        "+ MARGIN (default 0), estimated on the calibration votes",
+    )
+    thr.add_argument(
+        "--delta-floor",
+        type=float,
+        help="δ for the feasibility floor, a separate statement (default: --delta)",
+    )
+    thr.add_argument(
+        "--mt-bench-unit",
+        choices=("comparison", "vote"),
+        default="comparison",
+        help="MT-Bench example unit (default comparison; vote-level is always also "
+        "shown as a sensitivity check)",
+    )
+    thr.add_argument(
+        "--delta", type=float, default=0.1, help="allowed failure probability (default 0.1)"
+    )
+    thr.add_argument("--signal", help="score this recorded signal as the confidence")
+    thr.add_argument(
+        "--disjoint",
+        action="store_true",
+        help="cascade: calibrate each stage on its own share of the calibration set",
+    )
+
     study = sub.add_parser("study", help="run a multi-day schedule of configs, one day at a time")
     study_sub = study.add_subparsers(dest="study_command", required=True)
     s_run = study_sub.add_parser(
@@ -96,6 +142,53 @@ def build_parser() -> argparse.ArgumentParser:
         "--min-words", type=int, default=5, help="skip prompts shorter than this many words"
     )
     return parser
+
+
+def _run_thresholds(args: argparse.Namespace) -> int:
+    from ask_or_act.core.runs import load_run
+    from ask_or_act.guarantees.recommend import describe, grid_for_run, recommend, run_split
+    from ask_or_act.metrics.data import from_run
+
+    if args.test and len(args.test) != len(args.cal):
+        print("error: give one --test run per --cal run, in the same order", file=sys.stderr)
+        return 2
+    try:
+        cal = []
+        for path in args.cal:
+            record = load_run(path)
+            grid = grid_for_run(record, args.signal)
+            if run_split(record) == "test":
+                print(f"error: {path} is a test-half run; fit on calibration", file=sys.stderr)
+                return 2
+            name = str(record.metadata.get("name", path.name))
+            cal.append((name, from_run(record, args.signal), grid))
+        test = [from_run(load_run(p), args.signal) for p in args.test] if args.test else None
+        if args.alpha is not None and args.alpha_vs_human is not None:
+            raise ValueError("give --alpha or --alpha-vs-human, not both")
+        alpha = 0.1 if args.alpha is None and args.alpha_vs_human is None else args.alpha
+        kw = {
+            "alpha": alpha,
+            "delta": args.delta,
+            "delta_floor": args.delta_floor,
+            "disjoint": args.disjoint,
+            "alpha_vs_human": args.alpha_vs_human,
+        }
+        rec = recommend(cal, test, mt_bench_unit=args.mt_bench_unit, **kw)
+        other = None
+        if rec.dataset == "mt_bench":
+            flip = "vote" if args.mt_bench_unit == "comparison" else "comparison"
+            other = recommend(cal, test, mt_bench_unit=flip, **kw)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    for line in describe(rec):
+        print(line)
+    if other is not None:
+        label = "sensitivity" if other.unit == "vote" else "pre-registered unit"
+        print(f"\n--- {label}: MT-Bench per {other.unit}")
+        for line in describe(other):
+            print(line)
+    return 0
 
 
 def _run_study(args: argparse.Namespace) -> int:
@@ -205,6 +298,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_run(args)
     if args.command == "metrics":
         return _run_metrics(args)
+    if args.command == "thresholds":
+        return _run_thresholds(args)
     if args.command == "study":
         return _run_study(args)
     if args.command == "audit-redaction":

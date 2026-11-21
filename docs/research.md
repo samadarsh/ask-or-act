@@ -33,7 +33,20 @@ Jung, Brahman, Choi. ICLR 2025. [arXiv:2407.18370](https://arxiv.org/abs/2407.18
 - The cascade structure (cheap → strong → human). This is exactly act / ask / escalate.
 - "Guaranteed human agreement" as the headline metric for judge mode (M4).
 
-**Theorem to cite:** TBD at implementation (M3b).
+**Theorems cited (read in full, v1, the only version, 2024-07-25):**
+- **§2.1, Eq. (4):** exact binomial (1 − δ) upper bound R̂⁺(λ) =
+  sup{R : P(Bin(n(λ), R) ≤ ⌈n(λ)R̂(λ)⌉) ≥ δ}
+  ([binomial.py](../src/ask_or_act/guarantees/binomial.py)).
+- **§2.1, Eq. (5) and Theorem 1:** λ̂ = inf{λ : R̂⁺(λ′) ≤ α ∀ λ′ ≥ λ}, tested from the
+  largest λ down; then P(agree | conf ≥ λ̂) ≥ 1 − α with probability ≥ 1 − δ
+  ([fixed_sequence.py](../src/ask_or_act/guarantees/fixed_sequence.py)).
+- **Appendix A.1** proves R̂⁺ is a valid bound at a fixed λ and applies it at λ̂. The
+  step from a fixed λ to the selected λ̂ is the fixed-sequence argument (Bauer 1991),
+  proved in Kotte v2 Lemma E.1, which we cite next to the code.
+- **§2.3 Algorithm 1** (routing), **Algorithm 2 and Appendix A.2** (cascade calibration
+  at δ/|M| per stage on previously-abstained examples; union bound)
+  ([cascade.py](../src/ask_or_act/guarantees/cascade.py)). Caveat we flag: stage i's
+  calibration data is not independent of earlier thresholds; `disjoint=True` fixes it.
 
 ---
 
@@ -93,12 +106,18 @@ number the result **Proposition 3** (§2.2), but they state it differently.
 [feasibility.py](../src/ask_or_act/metrics/feasibility.py) cites v2, Proposition 3, and
 is tested against v2's own worked numbers.
 
-**Caveats**
-- The proposition statements were read verbatim from the HTML of both versions. The
-  proof (v2 Appendix E.4) was only seen as a summary.
-- The direction of the ε correction is our reading, as a high-probability lower
-  confidence bound on μ. **TODO (blocker for M3b):** re-read E.4 in the full PDF before relying on the
-  conservative floor.
+**Verified (2026-11-20) against the full v2 PDF**
+- **Appendix E.4**, "Plug-in version (δ/2 + δ/2 split)": one-sided Hoeffding at δ/2,
+  P(μ < μ̂ − ε) ≤ δ/2 with ε = √(log(2/δ)/(2n)), so abstention ≥ (μ̂ − α)/(M − α) −
+  ε/(M − α). That is exactly `min_abstention_conservative`. E.4's worked numbers
+  (n = 1000, δ = 0.1: ε ≈ 0.0387, correction ≈ 0.043) are a test.
+- **Joint statement:** E.4 holds the floor on the intersection with the paired risk
+  guarantee (δ/2 each). On its own the floor holds at 1 − δ/2.
+- **Also read for M3b:** §2 (Algorithm 1, the descending fixed-sequence scan) and
+  Appendix E.2 **Lemma E.1**, the validity proof for the scan-selected threshold. It
+  needs no monotonicity of risk in λ. Its candidate filter n(λ) ≥ 20 depends on the
+  calibration scores; the proof conditions on the scores, which controls the
+  score-conditional risk. We use a fixed grid instead (see docs/guarantees.md).
 
 ### 2c. Background: the original conformal risk control paper
 

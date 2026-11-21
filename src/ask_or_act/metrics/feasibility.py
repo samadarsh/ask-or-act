@@ -10,22 +10,27 @@ predictor whose emitted risk satisfies E[R | emit] ≤ α must abstain with prob
 The population statement is exact and holds for *any* selective predictor and any
 confidence score. No threshold or method can do better.
 
-Finite samples: v2 (§2.2) gives the plug-in correction ε / (M − α), with
-ε = √(log(2/δ) / (2n)), for μ̂ estimated from n held-out points at level δ/2. We
-subtract it, so the conservative floor holds with high probability.
+Finite samples: v2 **Appendix E.4** ("Plug-in version (δ/2 + δ/2 split)"), read in the
+full v2 PDF on 2026-11-20. With μ̂ from n held-out points, a one-sided Hoeffding bound
+at level δ/2 gives P(μ < μ̂ − ε) ≤ δ/2 with ε = √(log(2/δ) / (2n)). Substituting
+μ ≥ μ̂ − ε into the floor gives
 
-TODO(M3b): BLOCKER before milestone 3b uses ``min_abstention_conservative``. Re-check
-the finite-sample correction against the full v2 PDF (Appendix E.4, the proof). We only
-saw the proof in summary form. The direction (subtract ε from μ̂, i.e. a lower
-confidence bound on μ) and the δ/2 split are our reading of the §2.2 remark. The
-population floor ``min_abstention`` is verified against the paper's worked numbers; the
-conservative one is not. Reports mark it with "*".
+    abstention ≥ (μ̂ − α)/(M − α) − ε/(M − α),
+
+which is ``min_abstention_conservative`` (clipped at 0). The correction is ε/(M − α), not
+ε. E.4's worked numbers (n = 1000, δ = 0.1, M = 1: ε ≈ 0.0387, correction ≈ 0.043 at
+α = 0.1) are a regression test (tests/test_guarantees.py).
+
+**Joint statement.** E.4 states the floor on the event where *both* the Hoeffding bound
+(δ/2) and the risk guarantee of the method it accompanies (δ/2) hold. So when a report
+pairs this floor with a guaranteed threshold, the joint probability is 1 − δ only if
+the threshold was certified at δ/2. On its own, the floor holds with probability
+≥ 1 − δ/2.
 
 Version note: v1 (2026-06-27) states its Proposition 3 as (μ − α)/(1 − α) − O(√(log(1/δ)/n))
 for losses in [0, 1]. That is the M = 1 case of v2. We use 0/1 loss (R = 1 if wrong), so
 M = 1 whenever any error occurs, and the two versions agree. We cite v2 because it states
-the constant explicitly. The proof (v2 Appendix E.4) was checked from a summary only, not
-verbatim; see docs/research.md.
+the constant explicitly.
 """
 
 import math

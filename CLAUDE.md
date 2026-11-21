@@ -48,6 +48,7 @@ uv run ask-or-act metrics runs/<a> runs/<b>        # paired comparison (+ ACE vi
 uv run ask-or-act audit-redaction [paths]          # fail if Aegis prompt text is on disk
 uv run ask-or-act study status configs/study/schedule.toml   # study progress; no calls
 scripts/daily.sh [schedule]                        # today's study runs (asks first)
+uv run ask-or-act thresholds --cal runs/<cal> --test runs/<test>   # M3b thresholds
 ```
 
 Metrics (milestone 2): `metrics/` holds pure functions over saved runs. A run stores
@@ -192,10 +193,16 @@ All four must pass before a change is done.
 - A distribution-shift warning. The guarantees assume calibration data and test data are
   exchangeable, so warn when that looks violated.
 
-- **TODO (blocker for M3b):** re-check the Kotte finite-sample correction
-  (`min_abstention_conservative` in `metrics/feasibility.py`) against the full v2 PDF,
-  Appendix E.4, before any guaranteed-threshold code uses it. Only the population floor
-  is verified so far.
+- **Kotte finite-sample correction: verified (2026-11-20)** against the full v2 PDF,
+  Appendix E.4. `min_abstention_conservative` matches it exactly; the floor holds at
+  1 − δ/2 on its own (E.4 splits δ between the floor and the paired risk guarantee).
+- **Fixed-sequence thresholds (implemented, `guarantees/`):** ToE v1 §2.1 Eq. (4)–(5)
+  and Theorem 1, with validity of the selected λ̂ from Kotte v2 Lemma E.1. The grid and
+  scan starts are pre-registered from the signal's scale, never from data. Several
+  starts split δ by a union bound.
+- **Pre-registered and FROZEN (2026-11-21):** the grid, scan starts, δ split and the
+  MT-Bench unit/tie rule (docs/guarantees.md). They were chosen on the free baselines and
+  fakes only. Never change them after seeing LLM results.
 
 **CI gate and decision changelog (M6)**
 - Inspired by Self-Improvement Memory (arXiv 2611.18856). Every run appends an entry

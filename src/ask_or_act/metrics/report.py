@@ -372,8 +372,8 @@ def render_single(r: Mapping[str, Any], title: str) -> str:
             f"{f['min_abstention']:.1%} (conservative* {f['min_abstention_conservative']:.1%})"
         )
     lines.append(
-        "    * TODO(M3b): finite-sample correction not yet verified against the full "
-        "PDF; don't rely on it"
+        "    * with the finite-sample correction ε/(1 − α) (Kotte v2 App. E.4); holds with "
+        "probability ≥ 1 − δ/2"
     )
     if "mt_bench" in r:
         mb = r["mt_bench"]
