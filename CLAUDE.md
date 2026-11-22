@@ -49,6 +49,7 @@ uv run ask-or-act audit-redaction [paths]          # fail if Aegis prompt text i
 uv run ask-or-act study status configs/study/schedule.toml   # study progress; no calls
 scripts/daily.sh [schedule]                        # today's study runs (asks first)
 uv run ask-or-act thresholds --cal runs/<cal> --test runs/<test>   # M3b thresholds
+uv run ask-or-act judge runs/<mt_bench-run>        # M4 judge mode: agreement, position/length/ties
 ```
 
 Metrics (milestone 2): `metrics/` holds pure functions over saved runs. A run stores

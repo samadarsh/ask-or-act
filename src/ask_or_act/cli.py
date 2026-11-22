@@ -68,6 +68,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="score this recorded signal as the confidence, e.g. "
         "verbalized, token_logprob, verbalized_logprob, self_consistency, native",
     )
+    jud = sub.add_parser("judge", help="judge-mode analysis of an MT-Bench run (no calls)")
+    jud.add_argument("runs", nargs="+", type=Path, help="runs/<id> of MT-Bench runs")
+    jud.add_argument("--raw-dir", type=Path, default=Path("data/raw"), help="for answer lengths")
     thr = sub.add_parser(
         "thresholds",
         help="act/ask/escalate thresholds with a risk guarantee (fit on calibration runs)",
@@ -232,6 +235,24 @@ def _run_thresholds(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_judge(args: argparse.Namespace) -> int:
+    from ask_or_act import judge
+    from ask_or_act.core.runs import load_run
+    from ask_or_act.metrics.data import from_run
+
+    for path in args.runs:
+        try:
+            s = from_run(load_run(path))
+            rep = judge.judge_report(s, judge.load_lengths(s.ids, args.raw_dir))
+        except (FileNotFoundError, ValueError) as exc:
+            print(f"error: {path}: {exc}", file=sys.stderr)
+            return 2
+        print(f"== {path.name}")
+        for line in judge.describe(rep):
+            print(line)
+    return 0
+
+
 def _run_study(args: argparse.Namespace) -> int:
     from ask_or_act import study
     from ask_or_act.core.config import ConfigError
@@ -341,6 +362,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_metrics(args)
     if args.command == "thresholds":
         return _run_thresholds(args)
+    if args.command == "judge":
+        return _run_judge(args)
     if args.command == "study":
         return _run_study(args)
     if args.command == "audit-redaction":
