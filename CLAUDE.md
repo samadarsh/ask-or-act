@@ -50,6 +50,7 @@ uv run ask-or-act study status configs/study/schedule.toml   # study progress; n
 scripts/daily.sh [schedule]                        # today's study runs (asks first)
 uv run ask-or-act thresholds --cal runs/<cal> --test runs/<test>   # M3b thresholds
 uv run ask-or-act judge runs/<mt_bench-run>        # M4 judge mode: agreement, position/length/ties
+uv run ask-or-act report runs/<a> runs/<b> ...     # M5 static HTML report -> reports/report.html
 ```
 
 Metrics (milestone 2): `metrics/` holds pure functions over saved runs. A run stores
@@ -80,6 +81,11 @@ Architecture (milestone 1):
 
 A new provider is one class that satisfies `Decider`, plus one line in
 `deciders/__init__.py`.
+
+Report (milestone 5): `report/table.py` defines `DecisionTable`, the report's only input:
+one row per decision (id, prediction, confidence, human label; optional split, group,
+options). Saved runs are converted by `from_run`, which also resolves the PRE-REGISTERED
+target and threshold grid. Users' own CSV files will get an adapter into the same table.
 
 Deciders (milestone 3): see `docs/deciders.md`.
 

@@ -68,6 +68,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="score this recorded signal as the confidence, e.g. "
         "verbalized, token_logprob, verbalized_logprob, self_consistency, native",
     )
+    rep = sub.add_parser("report", help="one static HTML report for a set of runs (no calls)")
+    rep.add_argument("runs", nargs="+", type=Path, help="runs/<id> ...")
+    rep.add_argument("--out", type=Path, default=Path("reports/report.html"), help="HTML path")
+    rep.add_argument("--title", default="ask-or-act report")
+    rep.add_argument("--raw-dir", type=Path, default=Path("data/raw"), help="for MT-Bench lengths")
+    rep.add_argument(
+        "--seen-ids",
+        type=Path,
+        default=Path("configs/pilot/seen_test_ids.json"),
+        help="ids for the pre-registered sensitivity check (docs/study.md)",
+    )
+    rep.add_argument("--n-boot", type=int, default=2000, help="bootstrap resamples")
     jud = sub.add_parser("judge", help="judge-mode analysis of an MT-Bench run (no calls)")
     jud.add_argument("runs", nargs="+", type=Path, help="runs/<id> of MT-Bench runs")
     jud.add_argument("--raw-dir", type=Path, default=Path("data/raw"), help="for answer lengths")
@@ -235,6 +247,26 @@ def _run_thresholds(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_report(args: argparse.Namespace) -> int:
+    from ask_or_act.metrics.report import Settings
+    from ask_or_act.report.build import write_report
+
+    try:
+        out = write_report(
+            args.runs,
+            args.out,
+            raw_dir=args.raw_dir,
+            seen_path=args.seen_ids,
+            title=args.title,
+            settings=Settings(n_boot=args.n_boot),
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(f"saved: {out}")
+    return 0
+
+
 def _run_judge(args: argparse.Namespace) -> int:
     from ask_or_act import judge
     from ask_or_act.core.runs import load_run
@@ -362,6 +394,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_metrics(args)
     if args.command == "thresholds":
         return _run_thresholds(args)
+    if args.command == "report":
+        return _run_report(args)
     if args.command == "judge":
         return _run_judge(args)
     if args.command == "study":

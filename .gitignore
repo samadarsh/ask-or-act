@@ -22,6 +22,9 @@ data/cache/
 .cache/
 runs/
 
+# HTML reports (ask-or-act report); regenerable from runs.
+reports/
+
 .DS_Store
 
 # Daily study logs (scripts/daily.sh); may name ids and errors, never input text.
