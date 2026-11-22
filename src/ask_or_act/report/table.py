@@ -48,7 +48,7 @@ class DecisionRow:
     id: str
     prediction: str | None  # None: the decision failed (counts as wrong, confidence 0)
     confidence: float | None
-    label: str  # the human / gold label
+    label: str | None  # the human / gold label; None = unlabelled (coverage only)
     split: str | None = None  # "calibration", "test" or None (unknown)
     group: str | None = None  # bootstrap resampling unit; defaults to the id
     options: tuple[str, ...] = ()
@@ -115,28 +115,31 @@ class DecisionTable:
                 out.append(replace(self, rows=rows, key=f"{self.key}:{s or 'all'}"))
         return out
 
+    @property
+    def n_labelled(self) -> int:
+        return sum(r.label is not None for r in self.rows)
+
     @cached_property
     def scored(self) -> Scored:
-        """The aligned arrays every metric takes. Failed decisions: wrong, confidence 0."""
-        pred = tuple(ERROR_LABEL if r.prediction is None else r.prediction for r in self.rows)
-        gold = tuple(r.label for r in self.rows)
+        """The aligned arrays every metric takes, over the **labelled** rows only.
+        Failed decisions: wrong, confidence 0."""
+        rows = [r for r in self.rows if r.label is not None]
+        pred = tuple(ERROR_LABEL if r.prediction is None else r.prediction for r in rows)
+        gold = tuple(r.label for r in rows if r.label is not None)
         conf = np.array(
-            [
-                0.0 if r.prediction is None or r.confidence is None else r.confidence
-                for r in self.rows
-            ],
+            [0.0 if r.prediction is None or r.confidence is None else r.confidence for r in rows],
             dtype=np.float64,
         )
         return Scored(
-            ids=tuple(r.id for r in self.rows),
+            ids=tuple(r.id for r in rows),
             gold=gold,
             pred=pred,
             confidence=conf,
             correct=np.array([p == g for p, g in zip(pred, gold, strict=True)], dtype=np.bool_),
-            probabilities=tuple(dict(r.probabilities) for r in self.rows),
+            probabilities=tuple(dict(r.probabilities) for r in rows),
             options=tuple(sorted({o for r in self.rows for o in r.options})),
-            groups=tuple(r.group or r.id for r in self.rows),
-            meta=tuple(r.meta for r in self.rows),
+            groups=tuple(r.group or r.id for r in rows),
+            meta=tuple(r.meta for r in rows),
             dataset=self.dataset,
             n_errors=sum(p == ERROR_LABEL for p in pred),
         )

@@ -1,9 +1,17 @@
-"""Command-line entry point. More subcommands arrive in milestone 5."""
+"""Command-line entry point (docs/cli-design.md).
+
+The predictions commands (``check``; more to come) read the user's own file, run
+locally and make no network connection. The benchmark commands (``run``, ``study``,
+``data``, ``judge``, ``audit-redaction``) are unchanged until the study ends.
+"""
 
 import argparse
+import difflib
+import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Any
 
 from ask_or_act import __version__
 from ask_or_act.data import manifest
@@ -13,13 +21,158 @@ DEFAULT_RAW_DIR = Path("data/raw")
 DEFAULT_SAMPLES_DIR = Path("data/samples")
 
 
+LOCAL_ONLY = "The analysis commands (check) run locally: no network connections, no telemetry."
+NEW_COMMANDS = ("check",)
+
+
+def _parser_options() -> dict[str, Any]:
+    """New-style parser settings: no prefix abbreviations (clig.dev), and on 3.14+
+    argparse's own typo suggestions, with our colour decision (term.py)."""
+    from ask_or_act import term
+
+    opts: dict[str, Any] = {
+        "allow_abbrev": False,
+        "formatter_class": argparse.RawDescriptionHelpFormatter,
+    }
+    if sys.version_info >= (3, 14):
+        opts["suggest_on_error"] = True
+        opts["color"] = term.use_color(sys.stdout)
+    return opts
+
+
+def _columns(text: str) -> dict[str, str]:
+    out = {}
+    for part in text.split(","):
+        ours, sep, theirs = part.partition("=")
+        if not sep or not ours.strip() or not theirs.strip():
+            raise argparse.ArgumentTypeError(
+                f"expected name=column pairs, e.g. prediction=pred,confidence=score; got {text!r}"
+            )
+        out[ours.strip()] = theirs.strip()
+    return out
+
+
+def _unit_interval(text: str) -> float:
+    try:
+        v = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a number: {text!r}") from None
+    if not 0.0 < v < 1.0:
+        raise argparse.ArgumentTypeError(f"must be between 0 and 1, exclusive; got {text}")
+    return v
+
+
+def _output_flags() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    g = p.add_argument_group("output")
+    g.add_argument("--json", action="store_true", help="print one JSON document on stdout")
+    g.add_argument("-q", "--quiet", action="store_true", help="only the result and errors")
+    g.add_argument(
+        "--color",
+        choices=("auto", "always", "never"),
+        default="auto",
+        help="colour (default auto: on for a terminal, off with NO_COLOR)",
+    )
+    return p
+
+
+def _input_flags() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    g = p.add_argument_group("reading the file")
+    g.add_argument("--format", choices=("csv", "tsv", "jsonl"), help="default: from the extension")
+    g.add_argument(
+        "--columns",
+        type=_columns,
+        metavar="NAME=COLUMN,...",
+        help="map our column names to yours, e.g. prediction=pred,confidence=score",
+    )
+    g.add_argument(
+        "--confidence-scale",
+        default="probability",
+        metavar="SCALE",
+        help="probability (default, 0-1), percent (0-100), votes:K, or logprob",
+    )
+    g.add_argument(
+        "--confidence-of",
+        choices=("predicted", "positive"),
+        default="predicted",
+        help="predicted (default): confidence in the predicted answer; "
+        "positive: P(positive class), for two-label tasks",
+    )
+    g.add_argument(
+        "--positive", metavar="LABEL", help="the positive label for --confidence-of positive"
+    )
+    g.add_argument(
+        "--split-seed",
+        type=int,
+        default=0,
+        help="seed for the automatic split when there is no split column (default 0). "
+        "Choose it before looking at results: re-rolling seeds voids the guarantee",
+    )
+    g.add_argument(
+        "--cal-fraction",
+        type=_unit_interval,
+        default=0.5,
+        help="share of rows in the calibration half for the automatic split (default 0.5)",
+    )
+    g.add_argument(
+        "--split-map",
+        type=_columns,
+        metavar="VALUE=SPLIT,...",
+        help="rename split values, e.g. dev=calibration,holdout=test",
+    )
+    return p
+
+
+CHECK_EPILOG = """\
+examples:
+  # is my file usable, and what does it support?
+  ask-or-act check preds.csv
+
+  # my columns are called pred, conf and label
+  ask-or-act check preds.csv --columns prediction=pred,confidence=conf,human_label=label
+
+  # confidence is P(unsafe) from a binary classifier
+  ask-or-act check moderation.csv --confidence-of positive --positive unsafe
+
+input columns: id, prediction, confidence, human_label (required; empty prediction =
+a failed decision, empty human_label = unlabelled), options, split, group (optional).
+
+exit codes: 0 usable (maybe with warnings), 1 warnings under --strict, 6 errors.
+runs locally: no network connections, no telemetry.
+docs: https://github.com/samadarsh/ask-or-act/blob/main/docs/cli-design.md
+"""
+
+
 def build_parser() -> argparse.ArgumentParser:
+    opts = _parser_options()
     parser = argparse.ArgumentParser(
         prog="ask-or-act",
         description="Evaluate and calibrate AI decisions: when to act, ask, or escalate.",
+        epilog=f"{LOCAL_ONLY}\nNew here? ask-or-act check --help",
+        **{k: v for k, v in opts.items() if k != "allow_abbrev"},
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command")
+
+    chk = sub.add_parser(
+        "check",
+        help="validate a predictions file and say what it supports (local, no network)",
+        description="Validate a predictions file (CSV, TSV or JSONL) and say what it supports. "
+        "Every problem is reported at once, with line numbers and a fix. Use - for stdin.",
+        epilog=CHECK_EPILOG,
+        parents=[_input_flags(), _output_flags()],
+        **opts,
+    )
+    chk.add_argument("file", help="predictions file, or - for stdin (with --format)")
+    chk.add_argument("--alpha", type=_unit_interval, default=0.1, help="target risk (default 0.1)")
+    chk.add_argument(
+        "--delta",
+        type=_unit_interval,
+        default=0.1,
+        help="allowed failure probability (default 0.1)",
+    )
+    chk.add_argument("--strict", action="store_true", help="treat warnings as failures (exit 1)")
 
     data = sub.add_parser("data", help="benchmark dataset samples")
     data_sub = data.add_subparsers(dest="data_command", required=True)
@@ -379,10 +532,97 @@ def _run_data(args: argparse.Namespace) -> int:
     return status
 
 
+def _run_check(args: argparse.Namespace) -> int:
+    from ask_or_act import exit_codes, predictions, summaries, term
+
+    source: Any
+    if args.file == "-":
+        if sys.stdin.isatty():
+            build_parser().parse_args(["check", "--help"])
+        source = sys.stdin
+    else:
+        source = Path(args.file)
+    try:
+        scale = predictions.Scale.parse(args.confidence_scale)
+    except ValueError as exc:
+        print(term.Painter(term.use_color(sys.stderr, args.color)).error(str(exc)), file=sys.stderr)
+        return exit_codes.USAGE
+    result = predictions.check(
+        source,
+        format=args.format,
+        columns=args.columns,
+        confidence_scale=scale,
+        confidence_of=args.confidence_of,
+        positive=args.positive,
+        split_seed=args.split_seed,
+        cal_fraction=args.cal_fraction,
+        split_map=args.split_map,
+        alpha=args.alpha,
+        delta=args.delta,
+    )
+    if args.json:
+        print(json.dumps(summaries.check_json(result), indent=2, ensure_ascii=False))
+    else:
+        paint = term.Painter(term.use_color(sys.stdout, args.color))
+        print(summaries.check_text(result, paint, quiet=args.quiet))
+    if not result.ok:
+        return exit_codes.BAD_INPUT
+    if args.strict and result.warnings:
+        return exit_codes.NO
+    return exit_codes.OK
+
+
+def _guarded(run: Callable[[argparse.Namespace], int], args: argparse.Namespace) -> int:
+    """New commands: Ctrl-C exits 130 at once; a crash exits 70 with a report link,
+    never 1, so CI can't mistake a bug for a failed gate."""
+    from ask_or_act import exit_codes
+
+    try:
+        return run(args)
+    except KeyboardInterrupt:
+        print("interrupted", file=sys.stderr)
+        return exit_codes.INTERRUPTED
+    except Exception as exc:
+        print(
+            f"error: internal error (a bug in ask-or-act {__version__}): "
+            f"{type(exc).__name__}: {exc}\n  please report it: {exit_codes.ISSUES_URL}",
+            file=sys.stderr,
+        )
+        return exit_codes.INTERNAL
+
+
+def _suggest_command(parser: argparse.ArgumentParser, argv: Sequence[str]) -> int | None:
+    """Python < 3.14: "did you mean" for a mistyped command (3.14's argparse does this)."""
+    if sys.version_info >= (3, 14) or not argv or argv[0].startswith("-"):
+        return None
+    commands = [
+        name
+        for action in parser._actions
+        if isinstance(action, argparse._SubParsersAction)
+        for name in action.choices
+    ]
+    if argv[0] in commands:
+        return None
+    close = difflib.get_close_matches(argv[0], commands, n=1)
+    hint = f", maybe you meant {close[0]!r}?" if close else ""
+    parser.print_usage(sys.stderr)
+    print(
+        f"ask-or-act: error: unknown command {argv[0]!r}{hint} (choose from {', '.join(commands)})",
+        file=sys.stderr,
+    )
+    return 2
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the CLI and return a process exit code."""
     parser = build_parser()
+    argv = list(sys.argv[1:] if argv is None else argv)
+    bad = _suggest_command(parser, argv)
+    if bad is not None:
+        return bad
     args = parser.parse_args(argv)
+    if args.command == "check":
+        return _guarded(_run_check, args)
     if args.command == "data":
         unknown = sorted(set(args.names) - set(DATASETS))
         if unknown:

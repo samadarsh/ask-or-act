@@ -1,0 +1,912 @@
+# CLI design: "bring your own predictions"
+
+Status: **approved 2026-11-22 UTC**, with the decisions and additions below. Being
+implemented in steps (§7). A terminal session marked *real output* is pinned by
+`tests/test_cli_docs.py`: the test runs the command on the files in
+`tests/fixtures/predictions/` and fails if the output differs from this document.
+Every other session is still a mock-up whose numbers are illustrative.
+
+**Decisions (2026-11-22):**
+1. Bad input exits 6.
+2. `metrics` scores the test half by default, and its output says so and mentions
+   `--all`.
+3. The demo uses generated data from a realistically overconfident model, so it shows
+   a calibration warning and a real act/ask split.
+4. Targets are labelled TARGET (the user's own) vs PRE-REGISTERED (benchmark
+   configs).
+
+**Additions:** confidence semantics (§4.5), scale detection (§4.6), local-only with
+a test (§1, §5.4) and performance at 100,000 rows (§8).
+
+ask-or-act's main delivery becomes a CLI (`pip install ask-or-act`). It runs on a
+user's own predictions file, not only on our benchmarks. A user who has a model's
+predictions, its confidence scores and some human labels should be able to answer one
+question in under a minute:
+
+> Above what confidence can I let the model act, and how much will it then handle?
+
+This document fixes the design before any code changes. It covers:
+
+1. the guidelines we follow;
+2. what we copy from other CLIs, and what we avoid;
+3. the command tree, with an example session for each command;
+4. the input format and its validation;
+5. exit codes, stdout vs stderr, and the public Python API;
+6. the CLI framework.
+
+**Boundaries.**
+- Nothing here touches the study: `configs/study/`, `configs/pilot/`, decider
+  resolution, prompts, cache keys and example selection stay frozen, and
+  `tests/test_study_freeze.py` must keep passing.
+- `run`, `study`, `data` and `audit-redaction` keep their names, flags and exit codes
+  until the study ends (`scripts/daily.sh` depends on them).
+- The new commands make **no network calls**.
+
+All terminal sessions below are **mock-ups**: the numbers are illustrative, not
+results.
+
+---
+
+## 1. Guidelines checklist (from clig.dev)
+
+Source: [Command Line Interface Guidelines](https://clig.dev/), read in full. Each item
+is a rule we will follow, with the section it comes from. Items marked **(adapted)**
+explain where we deliberately do something narrower.
+
+### Basics and output ([#the-basics](https://clig.dev/#the-basics), [#output](https://clig.dev/#output))
+- [ ] Exit 0 on success and non-zero on failure. Distinct codes for the failure
+      modes that matter (section 5).
+- [ ] The result goes to **stdout**: the summary, or JSON with `--json`. Messages,
+      warnings, progress and errors go to **stderr**.
+- [ ] Human-readable by default. Decide whether a human is reading by checking
+      whether the stream is a TTY.
+- [ ] `--json` prints machine-readable output: one JSON document on stdout, and
+      nothing else on stdout.
+- [ ] Brief output on success, never silence that looks like a hang.
+- [ ] `-q/--quiet` suppresses everything but the result and errors.
+- [ ] When we write a file, say where (`saved: reports/report.html`).
+- [ ] Suggest the next command where it helps (`next: ask-or-act report preds.csv`).
+- [ ] **Boundary crossings are explicit.**
+  - We never read files the user didn't name, apart from our own config file (§3.10).
+  - The new commands never talk to a server.
+  - `run` keeps its explicit `--dry-run` and `--yes` flow.
+- [ ] Use colour with intention: red `error:`, yellow `warning:`, and nothing else.
+- [ ] Disable colour when the stream isn't a TTY, checking stdout and stderr
+      separately. Also disable it when `NO_COLOR` is set and non-empty, when
+      `TERM=dumb`, or with `--color never`. `FORCE_COLOR` or `--color always` turns it
+      on.
+- [ ] No animations when stderr isn't a TTY (clean CI logs).
+- [ ] No emoji. Plain Unicode symbols only (`✓`, `!`), always with words beside them.
+- [ ] stderr is not a log file: no `INFO:`/`WARN:` level tags, apart from the
+      `error:`/`warning:` prefixes. Detail goes behind `--verbose`.
+- [ ] **(adapted)** No pager. Our outputs are short. Long output means `--json` or
+      the HTML report.
+
+### Help and documentation ([#help](https://clig.dev/#help), [#documentation](https://clig.dev/#documentation))
+- [ ] `-h` and `--help` work on every command. `ask-or-act help <command>` is the same.
+- [ ] `ask-or-act` with no arguments shows concise help: what it does, two examples,
+      and the most common commands first. Required arguments missing → concise help
+      plus the error.
+- [ ] **Help leads with examples**, each with a one-line comment (§3 gives the
+      examples).
+- [ ] Every help page ends with a link to the docs page for that command and to the
+      issue tracker.
+- [ ] Typo → "did you mean" suggestion. We never auto-run the guess.
+- [ ] A command that expects a file never waits silently on an interactive stdin.
+      If the user passes `-` while stdin is a TTY, print help and exit.
+- [ ] Help text has no ANSI codes when piped.
+
+### Errors ([#errors](https://clig.dev/#errors))
+- [ ] Catch expected errors and rewrite them for humans, saying how to fix them.
+- [ ] Group repeated errors: one line per kind of problem, with a count and the first
+      few line numbers.
+- [ ] Put the most important line last (the fix).
+- [ ] Unexpected errors: a short message and a pre-filled issue link. The traceback
+      appears only with `--verbose`.
+
+### Arguments and flags ([#arguments-and-flags](https://clig.dev/#arguments-and-flags))
+- [ ] Prefer flags to positional arguments. The one positional argument is the
+      input file(s), like `cp` or `ruff check`.
+- [ ] Every flag has a long form. Short forms only for common ones: `-o`, `-q`, `-h`.
+- [ ] Standard names: `--json`, `-o/--output`, `-q/--quiet`, `-n/--dry-run`,
+      `--version`, `--no-input`.
+- [ ] **(adapted)** `--verbose` has no short form, because `-v` is ambiguous (clig
+      advises against it).
+- [ ] Defaults are right for most users: α = 0.10, δ = 0.10, automatic split.
+- [ ] `-` reads from stdin and writes to stdout.
+- [ ] Flags can come in any order, before or after the file.
+- [ ] Never read secrets from flags. API keys stay in the environment, and only
+      `run` uses them (section 6 notes the clig tension).
+- [ ] No prompts in the new commands. `run` keeps its `--yes` approval, which is
+      required whenever stdin isn't a TTY.
+
+### Subcommands, robustness and future-proofing
+([#subcommands](https://clig.dev/#subcommands), [#robustness-guidelines](https://clig.dev/#robustness-guidelines),
+[#future-proofing](https://clig.dev/#future-proofing))
+- [ ] Same flag names mean the same thing in every subcommand (`--alpha`, `--json`,
+      `--split-seed`).
+- [ ] No two commands with near-identical names.
+- [ ] Validate input fully **before** computing anything. One pass, every problem at
+      once.
+- [ ] Print something within 100 ms. Show a spinner on stderr only if a step takes
+      longer than 1 s and stderr is a TTY.
+- [ ] Ctrl-C exits at once with code 130. The new commands write files atomically
+      (temp file, then rename), so there is nothing to clean up.
+- [ ] Commands, flags, the input format, JSON field names and exit codes are a public
+      interface. Changes are additive; deprecations warn first. The `--json` output
+      carries a schema version.
+- [ ] No catch-all command, and no prefix abbreviations (`allow_abbrev=False`).
+      Aliases only when listed.
+- [ ] No dependence on outside services.
+- [ ] **Local-only.** `check`, `thresholds`, `metrics`, `compare`, `report`, `gate` and
+      `demo` make no network connection and send no telemetry. The top-level `--help`
+      and the README say so, and a test enforces it (§5.4).
+
+### Configuration and environment ([#configuration](https://clig.dev/#configuration), [#environment-variables](https://clig.dev/#environment-variables))
+- [ ] Precedence: **flags > environment variables > project config file > built-in
+      defaults**.
+- [ ] **(adapted)** No user-level or system-level config until someone needs it.
+      If added, it goes in `~/.config/ask-or-act/` (XDG).
+- [ ] Environment variables: `NO_COLOR`, `FORCE_COLOR` and `TERM` (standard) only.
+      None of our own until a need appears.
+
+### Distribution and analytics ([#distribution](https://clig.dev/#distribution), [#analytics](https://clig.dev/#analytics))
+- [ ] `pip install ask-or-act` / `uv tool install ask-or-act`, with numpy as the only
+      runtime dependency. The README's install section ends with how to uninstall.
+- [ ] **No telemetry and no update checks**, ever, opt-in or not.
+
+---
+
+## 2. What other CLIs do: copy and avoid
+
+Pages read on 2026-11-22. Where a page didn't document something, the table says so
+rather than guessing.
+
+| | help & examples | output formats | exit codes | config vs flags | progress / colour |
+|---|---|---|---|---|---|
+| **gh** | Each command page has an Examples section of commented `$` commands, a JSON-fields list and "See also" ([gh pr list](https://cli.github.com/manual/gh_pr_list)). | Plain text by default. `--json fields` prints JSON. `--json` with no fields **lists the available fields**. `--jq` and `--template` work on the JSON ([formatting](https://cli.github.com/manual/gh_help_formatting)). | 0 ok, 1 failed, 2 cancelled, 4 needs auth; commands may add more ([exit codes](https://cli.github.com/manual/gh_help_exit-codes)). | `gh config set` keys, and env vars for editor, pager, prompts and colour ([config](https://cli.github.com/manual/gh_config), [environment](https://cli.github.com/manual/gh_help_environment)). | `NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`; `GH_SPINNER_DISABLED` swaps the spinner for text ([environment](https://cli.github.com/manual/gh_help_environment)). |
+| **uv** | `-h`/`--help` and `uv help <cmd>` ([CLI reference](https://docs.astral.sh/uv/reference/cli/)). | Human text. `-q` quiet, `-qq` silent. | Not documented in the pages read. | Project `pyproject.toml [tool.uv]` or `uv.toml` > user > system. **Env vars override config files, and flags override both**. Also `--no-config` and `--config-file` ([config files](https://docs.astral.sh/uv/concepts/configuration-files/)). | `--color auto\|always\|never`; `--no-progress` / `UV_NO_PROGRESS`; `NO_COLOR` beats `FORCE_COLOR` ([environment](https://docs.astral.sh/uv/reference/environment/)). |
+| **ruff** | `-h` short, `--help` long, `ruff help <cmd>`. | `--output-format` with full, concise, json, json-lines, junit, github, gitlab, sarif, … ([configuration](https://docs.astral.sh/ruff/configuration/)). | **0 clean, 1 findings, 2 abnormal (bad config or CLI, internal error)**; `--exit-zero` ([exit codes](https://docs.astral.sh/ruff/linter/#exit-codes)). | Closest `pyproject.toml`/`ruff.toml` wins; CLI flags override; `--config KEY=VALUE`; `--isolated` ([configuration](https://docs.astral.sh/ruff/configuration/)). | `--color auto\|always\|never`. |
+| **promptfoo** | `init --example` scaffolds a project ([CLI](https://www.promptfoo.dev/docs/usage/command-line/)). | `-o` with the format inferred from the extension: csv, json, jsonl, yaml, html, xml, junit.xml ([outputs](https://www.promptfoo.dev/docs/configuration/outputs/)). | `eval`: **100 when tests fail**, 1 otherwise; `PROMPTFOO_FAILED_TEST_EXIT_CODE`, `PROMPTFOO_PASS_RATE_THRESHOLD` ([CLI](https://www.promptfoo.dev/docs/usage/command-line/)). | `promptfooconfig.yaml`; flags override its `commandLineOptions` ([config guide](https://www.promptfoo.dev/docs/configuration/guide/)). | `--no-progress-bar`, `--no-table`, `FORCE_COLOR=0`. |
+| **Inspect AI** (`inspect eval`) | Long option reference grouped by topic ([options](https://inspect.aisi.org.uk/options.html)). | `--display full\|conversation\|rich\|plain\|log\|none`; `--json` prints JSON lines and implies `--display none` ([inspect eval](https://inspect.aisi.org.uk/reference/inspect_eval.html)). Logs in `.eval`/`.json`, plus `inspect log dump/convert` ([logs](https://inspect.aisi.org.uk/eval-logs.html)). | Not documented in the pages read. | Every flag has an `INSPECT_EVAL_*` env var. Reads `.env` from the cwd **and parent directories**. `--run-config` YAML/JSON, overridden by flags ([options](https://inspect.aisi.org.uk/options.html)). | `--no-ansi`; `NO_COLOR` not mentioned. Built on click ([source](https://github.com/UKGovernmentBEIS/inspect_ai/blob/main/src/inspect_ai/_cli/main.py)). |
+| **lm-eval** | `lm-eval run / ls / validate`; a bare `lm-eval --model …` silently inserts `run` ([interface](https://github.com/EleutherAI/lm-evaluation-harness/blob/main/docs/interface.md)). | `--output_path`, `--log_samples`. `--limit` is marked "For testing only". | Not documented. | `--config` YAML, overridden by CLI args. | Not documented. Built on argparse ([source](https://github.com/EleutherAI/lm-evaluation-harness/tree/main/lm_eval/_cli)). |
+
+### What we copy
+1. **ruff's exit-code shape**, extended:
+   - 0 means the answer is yes;
+   - 1 means a clean "no", such as a gate failing;
+   - 2 means you called it wrong.
+
+   A crash never looks like a "no" (§5).
+2. **gh's `--json`**: one flag on every command, and a documented, versioned schema.
+   We skip `--jq`/`--template`, because users can pipe to `jq`.
+3. **gh's help pages**: examples first, with comments, then options, then "see also"
+   and a docs link.
+4. **uv's precedence statement**, written down once: flags > env > project file >
+   defaults. `--no-config` ignores the project file.
+5. **uv/ruff's `--color auto|always|never`**, plus `NO_COLOR` beats `FORCE_COLOR`.
+6. **promptfoo's `init --example` idea**, as `ask-or-act demo`: a working result
+   before the user has prepared anything.
+7. **promptfoo's `-o` with the format from the extension**, for files only:
+   `-o report.html`, `-o thresholds.json`.
+8. **lm-eval's `validate`**, as `ask-or-act check`: validation as its own command,
+   so CI can run it cheaply.
+9. **lm-eval's "for testing only" honesty**, in our wording: `--limit`-style shortcuts
+   and too-small samples get a warning in the output itself, not just in the docs.
+
+### What we avoid
+1. **Telemetry, update checks and cloud sharing** (promptfoo has update checks and a
+   `share` upload). Our users' data may be sensitive, so nothing leaves the machine.
+2. **Implicitly reading `.env` from parent directories** (Inspect). It's a silent
+   boundary crossing, and it can pick up secrets meant for another project.
+3. **An implicit default subcommand** (lm-eval inserts `run`). clig warns this blocks
+   future commands.
+4. **An env var for every flag** (Inspect's `INSPECT_EVAL_*`). It doubles the
+   interface to keep stable, and our runs are short and explicit.
+5. **Underscore flag names** (lm-eval's `--model_args`). We use dashes everywhere.
+6. **An exit code of 100 for "tests failed"** (promptfoo). It's non-standard; 1 is
+   what CI systems and shells expect for "no".
+7. **Many display modes** (Inspect has six). We have two outputs, a summary or
+   `--json`, plus `-q`.
+
+---
+
+## 3. Command tree
+
+```
+ask-or-act
+│  Your predictions (CSV/JSONL), no network:
+├── check FILE                 validate a predictions file and say what it supports
+├── thresholds FILE...         act/ask/escalate thresholds with a guarantee
+├── metrics FILE               accuracy, calibration, risk–coverage, κ, with CIs
+├── compare FILE_A FILE_B      paired comparison of two models on the same ids
+├── report FILE...             one static HTML report
+├── gate FILE --policy P       CI pass/fail against a policy (milestone 6)
+├── demo                       example data + report in under 30 s
+│
+│  Benchmark study (unchanged until the study ends):
+├── run CONFIG                 call a decider over a benchmark sample
+├── study {run,status}         the multi-day schedule
+├── data {sample,verify}       benchmark samples
+├── judge RUN                  MT-Bench judge analyses
+├── audit-redaction [PATHS]    fail if Aegis prompt text is on disk
+└── help [COMMAND]
+```
+
+**Where the existing commands fit.**
+- `run`, `study`, `data` and `audit-redaction` stay exactly as they are. They are
+  listed under a separate "Benchmark study" heading in the top-level help, so new
+  users see the predictions commands first.
+- After the study, they may move under `ask-or-act bench …` with the old names kept
+  as aliases. That is a separate decision.
+- `judge` stays with the benchmark commands for now. It needs MT-Bench's pairwise
+  metadata, which a generic predictions file doesn't have.
+- `metrics`, `thresholds` and `report` already exist for run folders. They will accept
+  **either** a predictions file **or** a run folder (a folder containing `run.json`).
+  Both become a `DecisionTable` (report/table.py), so every result is computed the
+  same way.
+  - `thresholds --cal RUN --test RUN` keeps working.
+  - `metrics RUN_A RUN_B` keeps working but prints a one-line note pointing to
+    `compare`.
+
+**Defaults shared by every command:**
+- α = 0.10 (the most risk you'll accept among decisions the model acts on) and
+  δ = 0.10 (the chance the guarantee itself fails).
+- Automatic split (§4.3), `--split-seed 0`.
+- 2,000 bootstrap resamples, 95% CIs.
+
+**Shared flags:** `--json`, `-q/--quiet`, `--verbose`, `--color WHEN`,
+`--no-config`, `-h/--help`.
+
+### 3.1 `check`: validate a file
+
+A file that is ready: 38 failed decisions and 400 unlabelled rows are warnings, not errors.
+
+<!-- real output (exit 0) -->
+```console
+$ ask-or-act check support-bot.csv
+support-bot.csv: 2,400 rows (CSV)
+  ✓ columns: id, prediction, confidence, human_label, split
+  ✓ 2,400 unique ids
+  ✓ confidence: probabilities in [0, 1], 581 distinct values
+  ✓ split column: 1,000 calibration / 1,000 test labelled rows
+  ! 38 rows have an empty prediction (lines 36, 52, 82, 149, 208, …): counted as wrong with confidence 0
+  ! 400 rows have no human_label: used to estimate coverage only
+
+Ready for metrics, thresholds and report.
+Guarantee at α = 0.1, δ = 0.1: needs at least 36 labelled calibration rows; you have 1,000.
+  (About 114 if the model is wrong on α/2 of the rows it acts on.)
+```
+
+A file with problems: every problem is found in one pass. The columns have other names, so the obvious mapping is still checked, which also finds the percent scale.
+
+<!-- real output (exit 6) -->
+```console
+$ ask-or-act check scores.csv
+scores.csv: 812 rows (CSV)
+  ✓ 812 unique ids
+  ✓ no split column: 406 calibration / 406 test labelled rows, by hashing each id (seed 0); same file → same split
+error: missing required columns "prediction", "confidence", "human_label". Found: id, pred, conf, label
+  hint: rename them, or map them: --columns prediction=pred,confidence=conf,human_label=label
+error: confidence is outside [0, 1] in 812 rows (lines 2, 3, 4, 5, 6, …); values run 35 to 100
+  hint: they look like percentages: pass --confidence-scale percent
+
+2 errors: fix and run check again.
+```
+
+The same file, with the fixes the hints gave:
+
+<!-- real output (exit 0) -->
+```console
+$ ask-or-act check scores.csv --columns prediction=pred,confidence=conf,human_label=label --confidence-scale percent
+scores.csv: 812 rows (CSV)
+  ✓ columns: id, prediction ← pred, confidence ← conf, human_label ← label
+  ✓ 812 unique ids
+  ✓ confidence: percentages 0–100, 65 distinct values
+  ✓ no split column: 406 calibration / 406 test labelled rows, by hashing each id (seed 0); same file → same split
+
+Ready for metrics, thresholds and report.
+Guarantee at α = 0.1, δ = 0.1: needs at least 36 labelled calibration rows; you have 406.
+  (About 114 if the model is wrong on α/2 of the rows it acts on.)
+```
+
+A binary classifier whose score is P(unsafe) (§4.5):
+
+<!-- real output (exit 0) -->
+```console
+$ ask-or-act check moderation.jsonl
+moderation.jsonl: 600 rows (JSONL)
+  ✓ columns: id, prediction, confidence, human_label
+  ✓ 600 unique ids
+  ✓ confidence: probabilities in [0, 1], 435 distinct values
+  ✓ no split column: 300 calibration / 300 test labelled rows, by hashing each id (seed 0); same file → same split
+  ! 68% of answered rows have confidence below 0.5. With two labels (safe, unsafe), that looks like P(unsafe), not confidence in the predicted answer
+    hint: if it is, pass --confidence-of positive --positive unsafe
+
+Ready for metrics, thresholds and report.
+Guarantee at α = 0.1, δ = 0.1: needs at least 36 labelled calibration rows; you have 300.
+  (About 114 if the model is wrong on α/2 of the rows it acts on.)
+```
+
+Too few labelled rows for a guarantee (§4.4):
+
+<!-- real output (exit 0) -->
+```console
+$ ask-or-act check pilot.csv
+pilot.csv: 40 rows (CSV)
+  ✓ columns: id, prediction, confidence, human_label
+  ✓ 40 unique ids
+  ✓ confidence: probabilities in [0, 1], 27 distinct values
+  ✓ no split column: 19 calibration / 21 test labelled rows, by hashing each id (seed 0); same file → same split
+  ! only 21 labelled rows in the test half: its risk estimate will have a wide confidence interval
+    hint: label more rows if you can
+  ! only 19 labelled calibration rows: a guarantee at α = 0.1, δ = 0.1 needs at least 36, so thresholds will refuse
+    hint: label at least 17 more rows, or loosen the target: --alpha 0.2 needs 17
+
+Ready for metrics and report.
+```
+
+`check --json` prints one document:
+`{"schema": "ask-or-act/check/v1", "version": …, "input": {…}, "result": {"ok": …, "errors": […], …}, "warnings": […]}`.
+`--strict` exits 1 when there are warnings. `-q` keeps only errors and the verdict.
+
+### 3.2 `thresholds`: when to act
+
+```console
+$ ask-or-act thresholds support-bot.csv
+support-bot.csv: 2,000 labelled rows, split by the split column (1,000 / 1,000)
+
+Act when confidence ≥ 0.87; ask a human below. Covers 74% of decisions.
+
+  Guarantee: at most 10% of acted-on decisions are wrong (α = 0.10), unless the
+  calibration sample was unlucky, which has probability ≤ 10% (δ = 0.10).
+  Test check: 6.1% wrong when acting [95% CI 4.6–7.9%], covering 72%: within α.
+  Unlabelled rows: this threshold would act on 296 of 400 (74%).
+  No threshold can reach α = 0.10 without escalating at least 9% of decisions.
+
+Assumes new data looks like this file. Details: --json, or ask-or-act report support-bot.csv
+```
+
+The summary line is the first thing a user sees, and the one they'd paste into a
+ticket. The "at least 9%" line is the Kotte feasibility floor (arXiv:2606.29054 v2,
+Prop. 3).
+
+**Two models (act / ask / escalate):** files are joined on `id`, cheapest first, ordered
+by the user, not by guess.
+
+```console
+$ ask-or-act thresholds small.csv large.csv
+Joined on id: 2,000 labelled rows in both files.
+
+small acts when confidence ≥ 0.91 (58% of decisions);
+otherwise ask large, which acts when ≥ 0.80 (31%);
+escalate the remaining 11% to a human.
+
+  Guarantee: at most 10% wrong among all acted-on decisions (α = 0.10, δ = 0.10,
+  δ split over the two stages).
+  Test check: 7.4% wrong when acting [95% CI 5.9–9.1%], covering 88%: within α.
+```
+
+**Not enough labelled data:** refuse before computing, with exit code 7.
+
+```console
+$ ask-or-act thresholds pilot.csv
+pilot.csv: 40 labelled rows → 20 calibration / 20 test (no split column; see below)
+error: too few labelled calibration rows for a guarantee at α = 0.10, δ = 0.10.
+  You have 20. Even if the model made no mistakes, the test needs at least 36 rows
+  the model acts on; with a realistic error rate (5%) it needs about 114.
+  hint: label more examples, or loosen the target (α = 0.20 needs at least 17).
+```
+
+**Nothing certified** is a valid answer, not an error: exit 0, and `"certified": false`
+in the JSON.
+
+```console
+Act on nothing: no confidence threshold keeps errors ≤ 10% with δ = 0.10.
+  Highest-confidence 20% still had 14% errors on calibration. Escalate everything,
+  or try a better-calibrated confidence signal.
+```
+
+Flags: `--alpha`, `--delta`, `--cal FILE --test FILE` (explicit halves),
+`--split-seed`, `--cal-fraction` (default 0.5), `--confidence-scale
+probability|percent|votes:K`, `--columns`.
+
+### 3.3 `metrics`: how good and how calibrated
+
+```console
+$ ask-or-act metrics support-bot.csv
+support-bot.csv, test half (1,000 labelled rows; 38 failed decisions count as wrong)
+
+Accuracy 83.2% [80.9–85.4]. Agreement with humans κ = 0.79 [0.76–0.82].
+Calibration: confidence overstates accuracy by about 4 points
+  (ECE 0.041 [0.031–0.058]; a perfectly calibrated model would show ~0.018 at this n).
+Ranking: the most confident 50% are 96.1% right (AURC 0.052).
+Confidence has 1,873 distinct values: thresholds can be fine-grained.
+```
+
+The metrics are computed on the **test half**: the calibration half is only for fitting
+thresholds, so it isn't scored here (CLAUDE.md, M2 notes). The first line of the output
+always says which rows were scored. When that's the test half, it adds
+"(--all scores every labelled row)". With `--all`, it says "all labelled rows". `--json` returns every metric with its CI and the noise
+floor.
+
+### 3.4 `compare`: is model B better than model A?
+
+```console
+$ ask-or-act compare gpt-small.csv gpt-large.csv
+Paired on 1,000 test ids present in both files.
+
+gpt-large is more accurate: 86.9% vs 83.2% (+3.7 points [+1.8, +5.6]; exact
+  McNemar p = 0.0003, Holm-adjusted p = 0.001).
+Calibration: no clear difference (ECE −0.006 [−0.019, +0.008]; p = 0.41).
+Brier: gpt-large better (−0.018 [−0.029, −0.007]; p = 0.004).
+At α = 0.10: gpt-large acts on 81% vs 74%.
+```
+
+The tests are exact McNemar, a centered paired bootstrap and Holm correction, as
+`metrics A B` already uses. A file whose ids don't match exits with code 6 and gives
+counts ("812 ids only in A, 9 only in B").
+
+### 3.5 `report`: one HTML page
+
+```console
+$ ask-or-act report support-bot.csv -o report.html
+saved: report.html (1 model, 2,000 labelled rows; opens offline, no external files)
+```
+
+This is the existing milestone 5 report, fed by the same table. Each threshold row is
+labelled with how its target was chosen:
+- **TARGET**: the user's own `--alpha` or the policy file's α.
+- **PRE-REGISTERED**: only for benchmark runs whose config registered α in advance.
+- **EXPLORATORY**: every other α shown.
+
+### 3.6 `gate` (milestone 6): pass or fail in CI
+
+```console
+$ ask-or-act gate predictions.csv --policy ask-or-act.toml
+policy ask-or-act.toml (α = 0.10, δ = 0.10, min coverage 70%, baseline main.csv)
+  ✓ threshold certified: act ≥ 0.87
+  ✓ coverage 74% ≥ 70%
+  ✗ accuracy vs baseline: 81.0% vs 83.2% (−2.2 points [−3.9, −0.5]): worse
+FAIL: 1 of 3 checks failed.
+$ echo $?
+1
+```
+
+The policy lives in a project file, version-controlled:
+
+```toml
+# ask-or-act.toml
+[gate]
+alpha = 0.10
+delta = 0.10
+min_coverage = 0.70
+baseline = "baselines/main.csv"   # paired: must not be significantly worse
+registered = "2026-12-01"         # when this policy was fixed (UTC)
+```
+
+The decision changelog (record the expected effect *before* the run) is milestone 6's
+own design and isn't fixed here.
+
+### 3.7 `demo`: something working in under 30 seconds
+
+```console
+$ ask-or-act demo
+Wrote ask-or-act-demo/support-tickets.csv: 2,000 synthetic predictions (ids, labels
+  and scores only; generated from seed 0, no download).
+
+Act when confidence ≥ 0.84; ask a human below. Covers 71% of decisions.
+  ...
+saved: ask-or-act-demo/report.html
+
+Try next:
+  ask-or-act check ask-or-act-demo/support-tickets.csv
+  ask-or-act thresholds ask-or-act-demo/support-tickets.csv --alpha 0.05
+```
+
+**Demo data:**
+- It's generated, not downloaded: a fixed-seed simulation of a ticket router whose
+  model is **realistically overconfident**. Its stated confidence runs about 8–10
+  points above its accuracy at the top. So the demo shows a calibration warning,
+  and a threshold that acts on part of the data and asks a human for the rest. This keeps the wheel small and avoids any licence
+  question. It contains no text at all.
+- It never overwrites an existing folder: if one exists, the demo writes
+  `ask-or-act-demo-2/`.
+- The 30-second budget is a CI test. If the demo takes longer, lower the number of
+  bootstrap resamples for the demo, and say so in its output.
+
+### 3.8 Benchmark commands (unchanged)
+
+The sessions are as today: see CLAUDE.md, "Commands". The only visible change is their
+heading in the top-level help.
+
+### 3.9 Top-level help
+
+```console
+$ ask-or-act
+ask-or-act: when can an AI's decisions be trusted, and when should a human decide?
+
+  ask-or-act check preds.csv           # is my file usable?
+  ask-or-act thresholds preds.csv      # act above what confidence?
+
+Your predictions (CSV or JSONL with id, prediction, confidence, human_label):
+  check, thresholds, metrics, compare, report, gate, demo
+Benchmark study:
+  run, study, data, judge, audit-redaction
+
+ask-or-act help <command> for details. New here? ask-or-act demo
+Docs: https://github.com/<owner>/ask-or-act/blob/main/docs/cli.md
+```
+
+### 3.10 Config file
+- **The file:**
+  - `ask-or-act.toml` in the current directory, or `[tool.ask-or-act]` in
+    `pyproject.toml`. If both exist, `ask-or-act.toml` wins, as with uv.
+  - The search goes upward to the repository root (the nearest `.git`), never above
+    it. That stops it picking up a config from an unrelated parent folder, the
+    Inspect `.env` problem.
+- **What it holds:** `[defaults]` (alpha, delta, split seed, columns) and `[gate]`.
+- **When it's used:** the first line of output names the file
+  (`config: ask-or-act.toml`) whenever it changed a default. Using the file is never
+  silent.
+- **Precedence:** flags > `NO_COLOR`/`FORCE_COLOR` > the file > built-in defaults.
+  `--no-config` ignores the file.
+
+---
+
+## 4. Input format
+
+### 4.1 Columns
+
+| column | required | type | meaning |
+|---|---|---|---|
+| `id` | yes | string, unique | joins files (`compare`, cascades) and is what reports show |
+| `prediction` | yes | string; empty = the decision failed | the model's answer |
+| `confidence` | yes | number in [0, 1] (see `--confidence-scale`) | the model's estimate that its answer is right |
+| `human_label` | yes (the column); a cell may be empty | string | the correct answer per a human; empty = unlabelled |
+| `options` | no | `\|`-separated in CSV, a list in JSONL | the allowed answers for this row |
+| `split` | no | `calibration` or `test` | fixes which half a row is in |
+| `group` | no | string | rows that must stay together: same user, same conversation, same question |
+
+- **Formats:**
+  - `.csv` (RFC 4180, UTF-8, BOM tolerated), `.tsv` and `.jsonl` (one object per line).
+  - `-` reads stdin, with `--format csv|tsv|jsonl`.
+  - Other columns and keys are ignored, and `check` lists them.
+- **Mapping columns:** `--columns prediction=pred,confidence=score`. The same
+  mapping can live in the config file.
+- **Confidence scales** (`--confidence-scale`). Each maps to an existing
+  pre-registered threshold grid in `guarantees/fixed_sequence.py`, which stays frozen:
+
+  | scale | values | converted to | grid |
+  |---|---|---|---|
+  | `probability` (default) | 0–1 | as is | continuous, 0.001 steps |
+  | `percent` | 0–100 | ÷ 100 | percent steps (the verbalized grid) |
+  | `votes:K` | integers 0–K (agreeing samples out of K) | ÷ K | K + 1 steps (self-consistency) |
+  | `logprob` | ≤ 0 (natural-log probability of the answer) | exp | continuous |
+
+  Unbounded scores, such as logits or margins, are not probabilities. They are
+  refused, with a hint to calibrate them first (for example, with a sigmoid fitted on
+  held-out data).
+- **Correct** means `prediction == human_label` after trimming spaces. It's
+  case-sensitive, but `check` warns when the two differ only by case.
+
+### 4.2 Validation
+
+Validation is one pass over the file, before any computation. Each problem is
+reported once, with a count, the first five line numbers and a hint.
+
+**Errors** (exit code 6; nothing is computed):
+
+| problem | message (shortened) |
+|---|---|
+| file unreadable or empty | `cannot read scores.csv: no such file` / `scores.csv has a header but no rows` |
+| missing required column | `missing required column "human_label". Found: …` + `--columns` hint; "did you mean `label`?" when a close name exists |
+| duplicate id | `id "t-0042" appears 3 times (lines 43, 980, 1201)` |
+| confidence not a number / NaN / inf | `confidence is not a number in 4 rows (lines …): "high", "", …` |
+| confidence outside [0, 1] | as in §3.1, with the percentage hint when values fall in 0–100 |
+| prediction/label outside `options` | `prediction "refund_status" is not in this row's options (line 77)` |
+| unknown `split` value | `split must be calibration or test; found "dev" in 120 rows` + `hint: map dev → calibration with --split-map dev=calibration` |
+| one group in both splits | `group "user-17" has rows in both calibration and test (lines …): that leaks information between the halves` |
+| JSONL line isn't an object | `line 12 is not a JSON object` |
+| files don't share ids (`compare`, cascades) | `812 ids only in A, 9 only in B; paired comparison needs the same ids` |
+
+**Warnings** (computation continues; `--strict` turns them into errors):
+
+| warning | why it matters |
+|---|---|
+| empty `prediction` in N rows | they count as wrong with confidence 0 (the existing policy) |
+| empty `human_label` in N rows | excluded from metrics and thresholds; used only to estimate coverage |
+| fewer than 20 distinct confidence values | thresholds are coarse; typical of verbalized confidence (arXiv:2608.04899) |
+| every confidence identical | no threshold can separate anything |
+| labels and predictions differ only by case/spacing | probably a formatting mismatch, not model errors |
+| test half under 100 labelled rows | the test check's CI will be wide |
+| confidence below 0.5 in ≥ 5% of answered rows of a two-label task | it looks like P(positive class), not confidence in the predicted answer (§4.5) |
+| confidence below 1/k in ≥ 5% of answered rows of a k-label task (k ≥ 3) | an argmax answer can't have less than 1/k; check what the column means (§4.5) |
+| labelled calibration rows below the minimum for a guarantee (§4.4) | `thresholds` will refuse; `check` says how many are needed |
+
+### 4.3 Without a split column
+A guarantee needs calibration data that the threshold is *fitted* on and test data it
+is *checked* on, kept apart. Without a `split` column:
+- Each row (or each `group`, if given) goes into calibration or test by hashing the
+  id: `sha256(f"{seed}:{group or id}")`, then
+  `calibration if hash < cal_fraction`.
+- The default is 50/50 with seed 0.
+- **It's reproducible:** the same id always lands in the same half. Adding rows,
+  removing rows or reordering the file never moves the existing rows, which a seeded
+  shuffle would.
+- **It's said out loud:**
+  `No split column: 1,000 calibration / 1,000 test, assigned by hashing each id (seed 0). Same file → same split.`
+- `--write-split out.csv` saves the file with the split column added, so the user can
+  freeze it.
+- **The rule is pre-registered:** the split rule may not depend on labels or scores.
+  A user who re-runs with new seeds until a result looks good voids the guarantee.
+  The help text for `--split-seed` says so.
+
+`--cal FILE --test FILE` skips splitting altogether.
+
+### 4.4 Too few labelled rows: refuse, and say how many are needed
+The minimum comes from the test we already use: the exact binomial test from Trust or
+Escalate (arXiv:2407.18370 v1, Eq. 4 and Theorem 1), run as a fixed-sequence scan
+(Kotte, arXiv:2606.29054 v2, Lemma E.1). For probability scores it runs from 4
+pre-registered starts at δ/4 each. To certify any threshold, the rows it acts on must
+pass
+
+  P(Bin(n, α) ≤ errors) ≤ δ / starts.
+
+With zero errors that is (1 − α)ⁿ ≤ δ/4. The minimum n, computed with our own
+`binomial.p_value` (4 starts, δ = 0.10):
+
+| α | 0 errors | errors at α/2 | errors at 3α/4 |
+|---|---|---|---|
+| 0.01 | 368 | 1,164 | 5,325 |
+| 0.05 | 72 | 230 | 1,013 |
+| 0.10 | 36 | 114 | 492 |
+| 0.20 | 17 | 48 | 219 |
+| 0.25 | 13 | 38 | 165 |
+
+How we use the table:
+- **Refuse** (exit 7) when the labelled calibration rows are fewer than the 0-errors
+  column. No threshold can be certified then, whatever the model does.
+- **Below the α/2 column, warn** that certification is unlikely, but still run.
+- The message gives the user's count, the two minimums and the α that their data
+  could support (§3.2).
+- The numbers are computed live by `binomial.p_value`, never hard-coded, so they stay
+  right if the grid kind changes the number of starts. (Self-consistency uses 1 start:
+  22 rows at α = 0.10.)
+
+### 4.5 What "confidence" means
+**Confidence is the model's probability that its predicted answer is correct.** For a
+model that picks the most likely of k answers, it is at least 1/k. This is what
+thresholds act on: "act when the model is at least 87% sure of *its answer*".
+
+Many binary classifiers instead output **P(positive class)**, for example
+P(unsafe) = 0.03 for a "safe" prediction. Read as confidence in "safe", that 0.03
+would be backwards. So, for two-label tasks:
+
+- `--confidence-of predicted` (the default): the column is confidence in the
+  prediction.
+- `--confidence-of positive --positive LABEL`: the column is P(LABEL). The confidence
+  in the prediction becomes p when the prediction is LABEL, and 1 − p otherwise.
+  - With labels `0`/`1` or `false`/`true`, the positive label defaults to `1` / `true`.
+  - Otherwise `--positive` is required, and the error lists the two labels.
+  - More than two labels is an error, because P(positive) only makes sense for two
+    classes.
+
+**Detection.** With the default, `check` warns when ≥ 5% of answered rows of a
+two-label task have confidence below 0.5. A model can't be less than 50% sure of the
+answer it chose between two. The warning names the label that looks positive: the one
+whose predictions carry the higher mean confidence. It also gives the exact flags:
+
+```
+! 41% of answered rows have confidence below 0.5. With two labels (safe, unsafe),
+  that looks like P(unsafe), not confidence in the predicted answer.
+  hint: if it is, pass --confidence-of positive --positive unsafe
+```
+
+### 4.6 Detecting the scale
+A file whose confidences don't fit the chosen scale is refused (exit 6), and the hint
+names the scale the values do fit. With the default `probability`:
+
+| what the values look like | hint |
+|---|---|
+| all within 0–100, some above 1 | `they look like percentages: pass --confidence-scale percent` |
+| whole numbers 0–K with K ≤ 20 | `they look like vote counts out of K: pass --confidence-scale votes:K` (also mentions percent) |
+| all ≤ 0 | `they look like log-probabilities: pass --confidence-scale logprob` |
+| negative and positive, or above 100 | `they look like unbounded scores (logits or margins), not probabilities: calibrate them first` |
+
+The detector only suggests. It never changes the scale on its own: a silent guess
+would change which threshold grid applies, and so the guarantee.
+
+---
+
+## 5. Exit codes, streams and the Python API
+
+### 5.1 Exit codes
+
+| code | meaning | used by |
+|---|---|---|
+| 0 | success. The answer may still be "act on nothing"; read the output | all |
+| 1 | a clean "no": the gate failed, or `check --strict` found warnings | `gate`, `check --strict` |
+| 2 | usage error: unknown flag, bad value, missing argument (argparse's own) | all |
+| 3 | budget exceeded *(existing)* | `run`, `study` |
+| 4 | needs approval: rerun with `--yes` *(existing)* | `run`, `study` |
+| 5 | daily quota reached; rerun later resumes from the cache *(existing; `daily.sh` relies on it)* | `run`, `study` |
+| 6 | the input data is invalid (unreadable, failed validation, ids don't match) | predictions commands |
+| 7 | too few labelled rows for the requested guarantee | `thresholds`, `gate` |
+| 70 | internal error (a bug), with a pre-filled issue link (`EX_SOFTWARE` from sysexits.h) | all |
+| 130 | interrupted (Ctrl-C) | all |
+
+- Codes 3–5 keep their meaning.
+- Today `metrics`, `report` and `thresholds` return 2 for bad input files. That
+  becomes 6, so 2 means only "you called the command wrong". This is the one
+  behaviour change to existing commands, and none of our scripts rely on it.
+- A crash gets 70, never 1, so CI never mistakes a bug for a failed gate.
+
+### 5.2 stdout and stderr
+- **stdout** holds the result only: the summary (§3), or exactly one JSON document
+  with `--json`. With `-o FILE`, the file is the result and stdout gets one line.
+  `saved:` lines go to stderr.
+- **stderr** holds everything else: the "read N rows" line, split notes, warnings,
+  errors, the spinner. So `ask-or-act thresholds x.csv --json | jq .threshold`
+  always works.
+- `-q` hides the stderr notes and warnings. Errors still show.
+- **The JSON envelope:**
+  `{"schema": "ask-or-act/<command>/v1", "version": "<package version>", "input": {...}, "result": {...}, "warnings": [...]}`.
+  - Fields are only ever added.
+  - Removing or renaming one bumps `v1` → `v2`, with a deprecation release first.
+- **Privacy:** outputs never echo input values other than ids, labels and numbers.
+  Error messages quote at most a 20-character snippet of a bad cell. The rule
+  against showing unsafe text applies to user files too: we don't know what they
+  contain.
+
+### 5.3 Public Python API
+The CLI is a thin layer: every command parses flags, calls one of these functions and
+formats the result. `result.to_json()` *is* the `--json` output, so the CLI and the
+API can't drift apart.
+
+```python
+import ask_or_act as aoa
+
+table = aoa.read_predictions("preds.csv")  # or a dict of columns, or a DecisionTable
+report = aoa.check("preds.csv")  # CheckResult: .ok, .errors, .warnings, .table
+
+th = aoa.find_thresholds(table, alpha=0.10, delta=0.10)
+th.threshold  # 0.87, or None if nothing is certified
+th.coverage  # 0.74 on calibration; th.test_coverage, th.test_risk, th.test_risk_ci
+th.certified  # bool
+th.summary()  # "Act when confidence ≥ 0.87; ask a human below. Covers 74% ..."
+
+ev = aoa.evaluate(table)  # test half by default
+ev.accuracy  # Estimate(value=0.832, low=0.809, high=0.854)
+ev.ece, ev.brier, ev.kappa, ev.aurc, ev.risk_coverage
+
+cmp = aoa.compare(table_a, table_b)  # paired tests, Holm-adjusted
+aoa.write_report([table], "report.html")
+```
+
+**Signatures** (keyword-only after the data, like a Go options struct):
+
+```python
+def read_predictions(source: str | PathLike | IO[str], *, format: str | None = None,
+                     columns: Mapping[str, str] | None = None,
+                     confidence_scale: str = "probability",
+                     confidence_of: Literal["predicted", "positive"] = "predicted",
+                     positive: str | None = None, split_seed: int = 0,
+                     cal_fraction: float = 0.5) -> DecisionTable
+def check(source: Data, **read_options) -> CheckResult          # never raises for bad data
+def find_thresholds(data: Data | Sequence[Data], *, alpha: float = 0.10,
+                    delta: float = 0.10, split_seed: int = 0, cal_fraction: float = 0.5,
+                    test: Data | None = None) -> Thresholds
+def evaluate(data: Data, *, n_boot: int = 2000, seed: int = 0, bins: int = 15,
+             rows: Literal["test", "all"] = "test") -> Evaluation
+def compare(a: Data, b: Data, *, n_boot: int = 2000, seed: int = 0) -> Comparison
+def write_report(data: Sequence[Data], out: str | PathLike, **options) -> Path
+
+Data = DecisionTable | str | PathLike | Mapping[str, Sequence[object]]
+```
+
+- **No pandas dependency.** A `Mapping` of columns works, so a pandas user passes
+  `df.to_dict("list")`.
+- **Errors are exceptions with the same text as the CLI:**
+  - `InputError(ValueError)` carries `.problems` and maps to exit 6;
+  - `NotEnoughData(ValueError)` carries `.have` and `.need` and maps to exit 7.
+- **What's public:**
+  - exactly the names in `ask_or_act.__all__`: the functions above, `DecisionTable`,
+    `DecisionRow` and the result types;
+  - everything else is internal and may change.
+  - Semantic versioning applies from 0.1.0.
+- **Typed:** the package already ships `py.typed`, so mypy users get the signatures.
+
+### 5.4 Local-only, enforced by a test
+`tests/test_local_only.py` replaces the socket layer for the whole test:
+`socket.socket.connect`, `connect_ex`, `socket.create_connection` and
+`socket.getaddrinfo`. Each replacement records the attempt and raises. The test then
+runs each analysis command in-process on fixture files and fails if anything was
+recorded. Commands join the test as each one is built; `check` is the first.
+
+The guarantee is about our code paths. An import that opened a connection would also
+be caught, because the commands import lazily inside the test.
+
+---
+
+## 6. CLI framework: keep argparse
+
+**Decision: keep argparse.** Write one small internal module (`cli/_term.py`, about
+100 lines) for colour, TTY checks, the spinner and error formatting.
+
+**Why:**
+1. **Minimal dependencies.** Today the only runtime dependency is numpy. Our
+   dependency tree contains no click, typer or rich.
+   - click alone would add one package.
+   - typer adds click, rich (with markdown-it-py, mdurl and pygments), shellingham
+     and typing-extensions.
+   - For users who install a statistics tool into their own environment, every
+     package is a possible version conflict.
+2. **What click/typer would give us, we mostly have or need little of:**
+   - Typo suggestions: Python 3.14's argparse does this
+     (`suggest_on_error=True`, checked in our venv). We switch it on where available.
+     On 3.12/3.13 we add the same with a few lines of `difflib.get_close_matches`.
+   - Coloured help: 3.14's argparse adds a `color` option. Checked in our venv: with
+     both `FORCE_COLOR` and `NO_COLOR` set, argparse still colours, so its
+     precedence is the opposite of ours. `_term.py` therefore makes the colour
+     decision (§1) and passes `color=<our decision>`; `color=False` always disables
+     it. On 3.12/3.13 we print help without colour, which is acceptable.
+   - Rich tables, panels and markdown: the summaries are deliberately a few lines of
+     plain text, and long output goes to the HTML report.
+   - Progress bars: one stderr spinner for steps over 1 s is all we need.
+3. **Peers:** lm-evaluation-harness ships a subcommand CLI on argparse; Inspect AI
+   uses click. Both are workable.
+4. **We already have it:** the existing CLI and its tests are argparse.
+
+**What argparse costs us,** and the fix for each:
+- Help with an examples section: an `epilog` plus `RawDescriptionHelpFormatter`.
+- Prefix abbreviations like `--alp` for `--alpha` (which clig warns against): turned
+  off with `allow_abbrev=False`.
+- Grouped commands in the top-level help: a custom usage text.
+- No shell completion. This is the one real gap. If users ask for it, click is the
+  smallest step, one dependency. We'd revisit then, not now.
+
+**Revisit if** we need shell completion, interactive prompts or rich terminal tables.
+
+---
+
+## 7. Implementation order (after approval)
+
+Each step lands with tests and must pass lint, format, mypy, pytest and the
+study-freeze test.
+
+Each step gets its own commit, after the author's approval.
+
+- **(a)** *(done 2026-11-22)* `read_predictions` and `check` (`predictions.py`, `term.py`, the `check`
+  command): every error and warning in §4.2, §4.5 and §4.6, the local-only test and
+  the 100,000-row measurement.
+- **(b)** `thresholds`, `metrics` and `compare` on predictions files, with the public
+  API (`find_thresholds`, `evaluate`, `compare`).
+- **(c)** `report` on predictions files.
+- **(d)** `demo`, with a timing test under 30 s.
+- **(e)** `gate` (milestone 6).
+
+As each command lands, its mock-up session in §3 becomes *real output*, pinned by
+`tests/test_cli_docs.py`.
+
+Out of scope here: renaming the benchmark commands, user-level config and shell
+completion.
+
+---
+
+## 8. Performance
+
+Target: a 100,000-row file runs every analysis command in seconds, in well under 1 GB.
+Measured on the author's machine (Apple silicon, Python 3.12). Each step adds its own
+row; `tests/test_performance.py` checks a generous limit in CI.
+
+| command | rows | wall time | peak memory (RSS) |
+|---|---|---|---|
+| `check` (CSV, 77 labels, split column) | 100,000 (4.3 MB) | 0.75 s | 176 MB RSS (Python alone: 25 MB); 118 MB Python heap |
+| `check` (JSONL) | 100,000 (9.4 MB) | 0.78 s | 176 MB RSS |
+
+Measured with `/usr/bin/time -l uv run ask-or-act check big.csv`, 2026-11-22. Memory is
+about 1.5 KB per row: the parsed cells, then one `DecisionRow` per row. That's fine at
+this size. If files of 10 million rows become a use case, the fix is columnar storage
+(numpy arrays), not a new format. `tests/test_performance.py` checks under 15 s and
+under 500 MB of Python heap on 100,000 rows.

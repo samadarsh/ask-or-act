@@ -9,7 +9,10 @@ query to, whether a message is safe, which of two answers is better, whether an 
 should *act*, *ask* a clarifying question, or *escalate*. `ask-or-act` is an open-source
 Python toolkit that evaluates and calibrates those decisions.
 
-> **Status:** milestone 0 (project setup). Nothing below the roadmap works yet.
+> **Status:** milestones 0–5 work: data, core, metrics, deciders, guaranteed thresholds,
+> judge mode and the HTML report. The benchmark study is running. The "bring your own
+> predictions" CLI is being built: `check` works; `thresholds`, `metrics`, `compare`,
+> `report` and `demo` are next ([docs/cli-design.md](docs/cli-design.md)).
 
 ## What it will do
 
@@ -24,6 +27,27 @@ Python toolkit that evaluates and calibrates those decisions.
   conformal risk control. It also says when no threshold can meet your target.
 - **Gate CI.** It fails a build when a decider regresses, and keeps a changelog of
   every decision about decisions.
+
+## Bring your own predictions
+
+Give it a CSV, TSV or JSONL file with one row per decision: `id`, `prediction`,
+`confidence` (the model's probability that its answer is right) and `human_label`.
+Optionally add `options`, `split` and `group`.
+
+```sh
+ask-or-act check preds.csv      # is the file usable, and what does it support?
+```
+
+`check` reports every problem at once, with line numbers and the flag that fixes it.
+For example, it suggests `--confidence-scale percent` for 0–100 scores, and
+`--confidence-of positive` for P(positive class). `thresholds`, `metrics`, `compare`,
+`report` and `demo` come next; [docs/cli-design.md](docs/cli-design.md) has the
+design.
+
+**Runs locally.** The analysis commands (`check`, and the ones that follow) make no
+network connections and send no telemetry. A test enforces this
+(`tests/test_local_only.py`). Only `run` calls model APIs, and only when you approve
+the cost.
 
 See [docs/research.md](docs/research.md) for the papers this builds on and
 [docs/datasets.md](docs/datasets.md) for the benchmark datasets.
