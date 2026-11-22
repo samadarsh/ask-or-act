@@ -115,6 +115,65 @@ configs) in `tests/fixtures/study_freeze.json`:
 CI fails if a code change alters any of them. Re-pinning needs the author's approval.
 The pinned settings match the decider config recorded in every pilot run's `run.json`.
 
+## Scheduled runs (launchd, from 2026-11-22 UTC)
+
+`scripts/study-job.sh` runs the study once a day without asking, as a macOS launchd job.
+
+**When it runs:**
+- At 10:00 local time, at most once per UTC day. Groq's daily limits reset at 00:00 UTC.
+- A 10:00 missed while the Mac slept runs on wake. One missed while it was off runs at
+  the next login, and an hourly check backs that up.
+- Any study log started that UTC day counts as the day's run, including a manual
+  `scripts/daily.sh` run, so a run is never repeated.
+- If a study run is already in progress, the job skips.
+
+**Isolation from development:** the job runs from a separate git worktree,
+`~/Developer/ask-or-act-study`, checked out at the newest `study-v*` tag.
+- Editing, switching branches or leaving uncommitted work in the main folder can't
+  affect it.
+- Its `runs/`, `.cache/`, `logs/`, `data/raw/` and `.env` are symlinks to the main
+  folder's. So there is one cache and one set of runs, and nothing is duplicated or
+  re-paid.
+- Before any call, preflight checks all of the following. If any check fails,
+  nothing is called and you get a notification.
+  - the worktree is clean and exactly at the newest `study-v*` tag;
+  - the shared folders are linked;
+  - `.env` contains `GROQ_API_KEY` (checked by name only);
+  - every config is free tier with `max_usd = 0`;
+  - `tests/test_study_freeze.py` passes.
+
+**What a run does:** `study run --yes` with the usual guards (budget, the 2% invalid-
+output stop, the quota stop), then `audit-redaction runs .cache logs`. The log
+`logs/<UTC time>-schedule.log` ends with a summary block: the study's exit code, the
+audit result and `result: OK` or `ATTENTION: …`.
+
+**When you get a notification:** a model STOPPED, the study errored, the audit found
+something or errored, a preflight check failed, or the job aborted. Reaching the
+daily limit is normal and doesn't notify.
+
+```sh
+scripts/study-job.sh today     # did today's (UTC) run happen, and how did it end?
+scripts/study-job.sh summary   # the latest run's result
+scripts/study-job.sh remove    # unload the job, delete its plist and the worktree
+                               # (runs, cache, logs and tags are kept)
+scripts/study-job.sh setup     # create the worktree, or move it to the newest pin
+scripts/study-job.sh install   # (re)write the plist and load the job
+```
+
+**Moving the pin (only if the study code itself needs a fix):**
+1. Fix it in the main folder and commit. CI must pass, including
+   `tests/test_study_freeze.py`. The freeze test is the guard: if the fix changed
+   any config's resolved settings, request bodies or selected ids, it fails. It is
+   never re-pinned without the author's approval.
+2. Tag the fixed commit with the next number and the reason:
+   `git tag -a study-v2 -m "why" <commit>`.
+3. `scripts/study-job.sh setup` moves the worktree to `study-v2` and syncs its
+   environment. Then run `scripts/study-job.sh install`, so the plist matches.
+4. Record the move and its reason in this file.
+
+Between steps 2 and 3, every run refuses with "not at the pin". So a new tag can't be
+picked up silently, and a forgotten move can't run old code unnoticed.
+
 ## Approved schedule (2026-11-21 UTC; measured tokens, 90% of each model's limits)
 
 Day 1 was the pilot. Each day: run `scripts/daily.sh` once after the quota resets.

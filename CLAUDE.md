@@ -48,6 +48,7 @@ uv run ask-or-act metrics runs/<a> runs/<b>        # paired comparison (+ ACE vi
 uv run ask-or-act audit-redaction [paths]          # fail if Aegis prompt text is on disk
 uv run ask-or-act study status configs/study/schedule.toml   # study progress; no calls
 scripts/daily.sh [schedule]                        # today's study runs (asks first)
+scripts/study-job.sh today|summary|remove          # the daily launchd job (docs/study.md)
 uv run ask-or-act thresholds --cal runs/<cal> --test runs/<test>   # M3b thresholds
 uv run ask-or-act judge runs/<mt_bench-run>        # M4 judge mode: agreement, position/length/ties
 uv run ask-or-act report runs/<a> runs/<b> ...     # M5 static HTML report -> reports/report.html
@@ -216,6 +217,10 @@ All four must pass before a change is done.
   `[guarantee]` table. Future work: a class-conditional Aegis target on missed unsafe.
   Banking77's came 7 min after the first Banking77 pilot calls (docs/guarantees.md).
 - **Dates are UTC everywhere.** A registration's date is its commit's UTC date.
+- **Scheduled study job (2026-11-22):** launchd runs `scripts/study-job.sh run` daily
+  from the worktree `~/Developer/ask-or-act-study`, pinned to the newest `study-v*` tag,
+  with runs/.cache/logs/data/raw/.env symlinked to the main folder. Never edit that
+  worktree; move the pin only as in docs/study.md, "Scheduled runs".
 - **Study (docs/study.md):** after the pilot, gpt-oss uses json_object on Banking77 and
   qwen samples at 0.7. A model whose invalid-output rate goes above 2% stops; tell the
   author. Test results are reported on the full test half (primary) and without the

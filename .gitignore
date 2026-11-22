@@ -29,3 +29,10 @@ reports/
 
 # Daily study logs (scripts/daily.sh); may name ids and errors, never input text.
 logs/
+
+# The study worktree (scripts/study-job.sh setup) links these to the main folder's.
+# Patterns without a trailing slash, so the symlinks are ignored too.
+/runs
+/logs
+/.cache
+/data/raw
