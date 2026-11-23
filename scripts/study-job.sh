@@ -64,8 +64,9 @@ log_epoch() { # logs/20261122T111126Z-schedule.log -> seconds since 1970
   date -j -u -f "%Y%m%dT%H%M%SZ" "${ts%%-*}" +%s 2>/dev/null
 }
 
-run_logs() { # every study log, oldest first (dry runs and launchd.log excluded)
-  find "$LOGS" -maxdepth 1 -name '*Z-schedule.log' 2>/dev/null | sort
+run_logs() { # every study log, oldest first (dry runs and launchd.log excluded); -H follows
+  # $LOGS when it is a link, as in the study worktree (BSD find skips a linked start dir)
+  find -H "$LOGS" -maxdepth 1 -name '*Z-schedule.log' 2>/dev/null | sort
 }
 
 due() { # prints the reason; exit 0 if a run is due
@@ -369,7 +370,7 @@ setup() { # create the study worktree, or move it to the newest pin; idempotent
 
 install() {
   [[ -x "$STUDY_DIR/scripts/study-job.sh" ]] || { echo "error: no study worktree; run: scripts/study-job.sh setup"; return 1; }
-  (cd "$STUDY_DIR" && check_worktree) || return 1
+  (cd "$STUDY_DIR" && REPO="$STUDY_DIR" && check_worktree) || return 1
   mkdir -p "$(dirname "$PLIST")" "$MAIN/logs"
   plist >"$PLIST.tmp"
   plutil -lint "$PLIST.tmp" >/dev/null

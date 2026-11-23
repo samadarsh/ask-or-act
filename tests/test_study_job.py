@@ -99,6 +99,28 @@ def test_due_rule(tmp_path: Path, case: str, now: str, logs: list[str], expected
     assert reason.startswith("due:" if expected else "not due:")
 
 
+def test_due_sees_runs_through_a_linked_logs_folder(tmp_path: Path) -> None:
+    """In the study worktree ``logs`` is a link to the main folder's. BSD ``find``
+    doesn't follow a linked start folder without -H; then no run is ever seen and the
+    hourly check would start a run every hour (found 2026-11-22)."""
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / "20261123T043000Z-schedule.log").write_text("")
+    link = tmp_path / "logs"
+    link.symlink_to(real)
+    env = {
+        **os.environ,
+        "TZ": TZ,
+        "ASK_OR_ACT_LOGS": str(link),
+        "ASK_OR_ACT_NOW": str(_epoch("2026-11-23T15:00:00")),
+    }
+    r = subprocess.run(
+        ["bash", str(SCRIPT), "due"], env=env, capture_output=True, text=True, check=False
+    )
+    assert r.returncode == 1, r.stdout
+    assert r.stdout.startswith("not due: a run already started today")
+
+
 def test_plist_is_valid_and_holds_no_secret(tmp_path: Path) -> None:
     out = subprocess.run(
         ["bash", str(SCRIPT), "plist"], capture_output=True, text=True, check=True
