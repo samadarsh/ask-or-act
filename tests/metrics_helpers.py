@@ -19,7 +19,7 @@ def scored(
 ) -> Scored:
     record = RunRecord(
         path=Path("memory"),
-        metadata={"dataset": {"name": dataset}},
+        metadata={"status": "completed", "dataset": {"name": dataset}},
         decisions=list(decisions),
         examples=[GoldRecord.of(e) for e in examples],
     )

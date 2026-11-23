@@ -107,6 +107,8 @@ Deciders (milestone 3): see `docs/deciders.md`.
 - **Groq:**
   - Daily limits stop a run cleanly: exit code 5, status `quota_stopped`. Re-running the
     same config later resumes from the cache.
+  - Analysis (metrics, thresholds, judge, report) refuses any run whose status isn't
+    `completed` (`require_completed` in `core/runs.py`). Analyse the cache-complete re-run.
   - Groq has no logprobs, so token_logprob and verbalized_logprob are unsupported there.
   - `cost_usd` is the published paid price; `charged_usd` is 0 on the free tier.
 - **Never print, log or echo key values.** To check that a key is present, test the

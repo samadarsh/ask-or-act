@@ -19,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ask_or_act.core.runs import RunRecord, load_run
+from ask_or_act.core.runs import RunRecord, load_run, require_completed
 from ask_or_act.core.types import JSON
 from ask_or_act.guarantees.fixed_sequence import DEFAULT_STARTS, grid_for
 from ask_or_act.guarantees.recommend import GridChoice, grid_for_run, run_guarantee, run_split
@@ -153,6 +153,7 @@ def from_run(path: Path) -> DecisionTable:
     """Convert a saved run (runs/<id>/) into a decision table. Input text is never read
     into the table: examples.jsonl holds labels and metadata only."""
     record = load_run(path)
+    require_completed(record)  # partial runs are never analysed
     if [d.example_id for d in record.decisions] != [e.id for e in record.examples]:
         raise ValueError(f"{path}: decisions and examples are not aligned")
     ds = record.metadata.get("dataset")

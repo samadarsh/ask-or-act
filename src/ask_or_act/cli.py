@@ -456,7 +456,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _run_thresholds(args: argparse.Namespace) -> int:
-    from ask_or_act.core.runs import load_run
+    from ask_or_act.core.runs import load_run, require_completed
     from ask_or_act.guarantees.recommend import (
         describe,
         grid_for_run,
@@ -474,6 +474,7 @@ def _run_thresholds(args: argparse.Namespace) -> int:
         registered = []
         for path in args.cal:
             record = load_run(path)
+            require_completed(record)  # before the split check: say the real reason
             registered.append(run_guarantee(record))
             grid = grid_for_run(record, args.signal)
             if run_split(record) == "test":

@@ -16,7 +16,7 @@ from dataclasses import dataclass
 import numpy as np
 import numpy.typing as npt
 
-from ask_or_act.core.runs import RunRecord
+from ask_or_act.core.runs import RunRecord, require_completed
 from ask_or_act.core.types import JSON
 
 ERROR_LABEL = "<error>"
@@ -75,7 +75,10 @@ class Scored:
 def from_run(record: RunRecord, signal: str | None = None) -> Scored:
     """``signal``: score a recorded confidence signal (e.g. "verbalized_logprob") instead
     of ``Decision.confidence``. Answered decisions without that signal keep their own
-    confidence and are counted in ``n_signal_fallback``, which reports show."""
+    confidence and are counted in ``n_signal_fallback``, which reports show.
+
+    Raises PartialRunError for a run that stopped early: see ``require_completed``."""
+    require_completed(record)
     if [d.example_id for d in record.decisions] != [e.id for e in record.examples]:
         raise ValueError(f"{record.path}: decisions and examples are not aligned")
     dataset_info = record.metadata.get("dataset")

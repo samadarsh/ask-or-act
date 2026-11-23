@@ -40,6 +40,7 @@ def _save(
         contents["guarantee"] = {"alpha": alpha, "delta": 0.1, "registered": "2026-11-21"}
     meta: dict[str, Any] = {
         "name": name,
+        "status": "completed",
         "dataset": {"name": "banking77", "split": split.value, "limit": n},
         "decider": decider.config.to_json(),
         "config": {"path": "configs/none.toml", "contents": contents},

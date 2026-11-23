@@ -25,6 +25,7 @@ def test_a_saved_run_converts_to_the_same_arrays_as_the_metrics_loader(tmp_path:
     decisions[3] = Decision.failed(examples[3].id, "timeout")  # errors: wrong, confidence 0
     meta: dict[str, JSON] = {
         "name": "x",
+        "status": "completed",
         "dataset": {"name": "banking77", "split": "test", "limit": 50},
     }
     path = save_run(tmp_path, "2026-x", meta, decisions, examples)

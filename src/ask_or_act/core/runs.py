@@ -137,3 +137,44 @@ def load_run(path: Path) -> RunRecord:
     decisions = [Decision.from_json(r) for r in _read_jsonl(path / "decisions.jsonl")]
     examples = [GoldRecord.from_json(r) for r in _read_jsonl(path / "examples.jsonl")]
     return RunRecord(path, metadata, decisions, examples)
+
+
+# --------------------------------------------------------------------------- partial runs
+
+STOP_REASONS = {"quota_stopped": "daily limit", "budget_stopped": "budget"}
+
+
+def partial_text(decided: int, total: int, skipped: int, status: str) -> str:
+    """ "partial: 21/77 decided (56 skipped: daily limit)". Shared by `run`'s quick check
+    and the analysis refusal, so the two always say the same thing."""
+    reason = STOP_REASONS.get(status, status)
+    other = total - decided - skipped
+    extra = f"; {other} other error(s)" if other else ""
+    return f"partial: {decided}/{total} decided ({skipped} skipped: {reason}{extra})"
+
+
+class PartialRunError(ValueError):
+    """The run stopped early (daily limit or budget). Its skipped examples are stored
+    as errors, and errors score as wrong with confidence 0, so analysing it would mix
+    "not asked yet" into accuracy, calibration and thresholds."""
+
+
+def require_completed(record: RunRecord) -> None:
+    """Analysis (metrics, thresholds, judge, report) reads completed runs only. The fix
+    for a partial run is to re-run its config after the reset: everything already
+    decided comes from the cache, and that new run is saved as completed."""
+    status = str(record.metadata.get("status", "unknown"))
+    if status == "completed":
+        return
+    from ask_or_act.core.runner import SKIPPED_PREFIXES
+
+    decided = sum(d.ok for d in record.decisions)
+    skipped = sum(bool(d.error and d.error.startswith(SKIPPED_PREFIXES)) for d in record.decisions)
+    cfg = record.metadata.get("config")
+    config = cfg.get("path", "<config>") if isinstance(cfg, dict) else "<config>"
+    raise PartialRunError(
+        f"{record.path.name} is not a completed run "
+        f"({partial_text(decided, len(record.decisions), skipped, status)}). "
+        f"Only completed runs are analysed: re-run `ask-or-act run {config} --yes` after "
+        "the reset; cached decisions are reused and the new run is complete."
+    )

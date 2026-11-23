@@ -14,7 +14,9 @@ from tests.helpers import fake, make_examples
 def make_run(tmp_path: Path, name: str, kind: str, seed: int = 1, n: int = 200) -> Path:
     examples = make_examples(n, k=3)
     decisions = asyncio.run(fake(kind, seed=seed).decide_batch(examples))
-    return save_run(tmp_path, name, {"dataset": {"name": "toy"}}, decisions, examples)
+    return save_run(
+        tmp_path, name, {"status": "completed", "dataset": {"name": "toy"}}, decisions, examples
+    )
 
 
 def test_single_run(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

@@ -30,7 +30,7 @@ from ask_or_act.core.cache import DecisionCache
 from ask_or_act.core.config import RunConfig, load_config
 from ask_or_act.core.limits import CallGate
 from ask_or_act.core.runner import Runner, RunOutcome, RunPlan
-from ask_or_act.core.runs import environment_info, git_info, make_run_id, save_run
+from ask_or_act.core.runs import environment_info, git_info, make_run_id, partial_text, save_run
 from ask_or_act.core.types import JSON, Example, sha256_hex
 from ask_or_act.data import manifest as manifest_io
 from ask_or_act.deciders import DeciderContext, build_decider
@@ -253,16 +253,24 @@ def run_from_config(
 
     ok = [d for d in outcome.decisions if d.ok]
     correct = sum(d.choice == ex.gold for d, ex in zip(outcome.decisions, examples, strict=True))
-    out(
-        f"done: {len(ok)}/{len(examples)} decided, {outcome.n_errors} error(s), "
+    money = (
         f"charged ${outcome.charged_usd:.4f} (true cost ${outcome.total_cost_usd:.4f}, "
-        f"${outcome.saved_usd:.4f} of it from cache), "
-        f"{outcome.wall_time_s:.2f}s"
+        f"${outcome.saved_usd:.4f} of it from cache), {outcome.wall_time_s:.2f}s"
     )
-    out(
-        f"accuracy (quick check; full report: ask-or-act metrics <run>): "
-        f"{correct / len(examples):.3f}"
-    )
+    if status == "completed":
+        out(f"done: {len(ok)}/{len(examples)} decided, {outcome.n_errors} error(s), {money}")
+        out(
+            f"accuracy (quick check; full report: ask-or-act metrics <run>): "
+            f"{correct / len(examples):.3f}"
+        )
+    else:
+        # Skipped examples were never asked, so scoring them as wrong (as metrics does
+        # for real errors) would make a partial run look far worse than it is.
+        out(f"{partial_text(len(ok), len(examples), outcome.n_skipped, status)}, {money}")
+        out(
+            f"accuracy on the {len(ok)} decided only (quick check; partial run, "
+            "not analysed): " + (f"{correct / len(ok):.3f}" if ok else "n/a")
+        )
     if outcome.n_errors:
         first = next(d for d in outcome.decisions if not d.ok)
         print(f"first error: {first.example_id}: {first.error}", file=sys.stderr)
