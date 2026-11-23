@@ -159,4 +159,6 @@ def test_cli_writes_the_report(world: tuple[list[Path], Path], tmp_path: Path) -
     ]
     assert main(argv) == 0
     assert out.read_text().startswith("<!doctype html>")
-    assert main(["report", str(tmp_path / "missing")]) == 2
+    assert (
+        main(["report", str(tmp_path / "missing")]) == 6
+    )  # a missing path is bad input (docs/cli-design.md §5)

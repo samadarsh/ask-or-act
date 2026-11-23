@@ -28,6 +28,16 @@ COMMANDS: list[list[str]] = [
         "--n-boot",
         "50",
     ],
+    ["report", str(FIXTURES / "support-bot-large.csv"), "-o", "{tmp}/one.html", "--n-boot", "50"],
+    [
+        "report",
+        str(FIXTURES / "support-bot.csv"),
+        str(FIXTURES / "support-bot-large.csv"),
+        "-o",
+        "{tmp}/two.html",
+        "--n-boot",
+        "50",
+    ],
     ["check", str(FIXTURES / "scores.csv"), "--json"],
     [
         "check",
@@ -66,9 +76,9 @@ def test_the_blocker_itself_works(no_network: list[str]) -> None:
 
 @pytest.mark.parametrize("argv", COMMANDS, ids=[" ".join(a[:1] + a[2:]) or a[0] for a in COMMANDS])
 def test_analysis_commands_make_no_network_calls(
-    argv: list[str], no_network: list[str], capsys: pytest.CaptureFixture[str]
+    argv: list[str], no_network: list[str], capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
-    code = main(argv)
+    code = main([a.replace("{tmp}", str(tmp_path)) for a in argv])
     capsys.readouterr()
     assert no_network == []
     assert code in (0, 6, 7)  # ran to completion: never a crash (70) from a blocked socket

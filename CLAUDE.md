@@ -54,6 +54,7 @@ uv run ask-or-act check preds.csv                  # users' own files: validate 
 uv run ask-or-act thresholds preds.csv             # act/ask/escalate with a guarantee (exit 7: too few rows)
 uv run ask-or-act metrics preds.csv                # test half by default; --all for every labelled row
 uv run ask-or-act compare a.csv b.csv              # paired tests + ACE on the same ids
+uv run ask-or-act report preds.csv [b.csv] -o r.html  # HTML page for 1-3 files (TARGET α)
 uv run python -m tests.test_cli_docs --write       # refresh docs/cli-design.md real-output blocks
 uv run ask-or-act judge runs/<mt_bench-run>        # M4 judge mode: agreement, position/length/ties
 uv run ask-or-act report runs/<a> runs/<b> ...     # M5 static HTML report -> reports/report.html

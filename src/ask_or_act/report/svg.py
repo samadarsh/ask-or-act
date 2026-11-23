@@ -26,6 +26,17 @@ class Series:
     ys: Sequence[float]
 
 
+@dataclass(frozen=True)
+class Mark:
+    """A point on a curve, e.g. the chosen threshold: a ring, plus a dashed drop to the
+    x axis so the coverage can be read off."""
+
+    x: float
+    y: float
+    series: int  # palette slot of the curve it sits on
+    tip: str
+
+
 def _fmt(v: float) -> str:
     return f"{v:.1f}"
 
@@ -99,11 +110,16 @@ def step_lines(
     x_label: str,
     y_label: str,
     y_max: float | None = None,
+    marks: Sequence[Mark] = (),
+    ref_y: tuple[float, str] | None = None,
 ) -> str:
-    """Stepwise curves (e.g. risk vs coverage), at most ``MAX_SERIES``."""
+    """Stepwise curves (e.g. risk vs coverage), at most ``MAX_SERIES``. ``marks``: points
+    to ring (the chosen threshold); ``ref_y``: a dashed horizontal line (e.g. α)."""
     if len(series) > MAX_SERIES:
         raise ValueError(f"at most {MAX_SERIES} series per chart; use small multiples")
     top = y_max if y_max is not None else max((max(s.ys, default=0.0) for s in series), default=1.0)
+    if ref_y is not None:
+        top = max(top, ref_y[0])
     top = nice_top(top)
     f = _Frame(0.0, 1.0, 0.0, top)
     body = _axes(f, x_label, y_label)
@@ -123,6 +139,23 @@ def step_lines(
             f'<circle class="end" cx="{_fmt(f.x(x_end))}" cy="{_fmt(f.y(y_end))}" r="4" '
             f'style="fill:var(--series-{k + 1})"><title>{escape(s.name)}: risk '
             f"{y_end:.1%} at full coverage</title></circle>"
+        )
+    if ref_y is not None:
+        v, name = ref_y
+        y = f.y(v)
+        body.append(
+            f'<line class="ref" x1="{PAD_L}" x2="{W - PAD_R}" y1="{_fmt(y)}" y2="{_fmt(y)}">'
+            f"<title>{escape(name)}</title></line>"
+            f'<text class="tick" x="{PAD_L + 4}" y="{_fmt(y - 4)}">{escape(name)}</text>'
+        )
+    for m in marks:
+        cx, cy = f.x(m.x), f.y(m.y)
+        color = f"var(--series-{m.series})"
+        body.append(
+            f'<line class="drop" x1="{_fmt(cx)}" x2="{_fmt(cx)}" y1="{_fmt(cy)}" '
+            f'y2="{H - PAD_B}" style="stroke:{color}"/>'
+            f'<circle class="mark" cx="{_fmt(cx)}" cy="{_fmt(cy)}" r="6" '
+            f'style="stroke:{color}"><title>{escape(m.tip)}</title></circle>'
         )
     return _svg(body, title)
 

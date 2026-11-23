@@ -18,6 +18,7 @@ _PUBLIC = {
     "find_thresholds": "ask_or_act.api",
     "evaluate": "ask_or_act.api",
     "compare": "ask_or_act.api",
+    "write_report": "ask_or_act.api",
     "Thresholds": "ask_or_act.api",
     "Evaluation": "ask_or_act.api",
     "Comparison": "ask_or_act.api",

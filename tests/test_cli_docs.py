@@ -1,7 +1,7 @@
 """The terminal sessions in docs/cli-design.md marked *real output* are real.
 
 Each block preceded by ``<!-- real output (exit N) -->`` starts with ``$ ask-or-act …``.
-The test runs that command in-process from tests/fixtures/predictions/, with stdout and
+The test runs that command in-process in a copy of tests/fixtures/predictions/, with stdout and
 stderr in one buffer (the order a terminal would show), and compares the result with
 the block and the exit code with N. Change the output, and the document must change
 too.
@@ -11,6 +11,8 @@ import contextlib
 import io
 import re
 import shlex
+import shutil
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -41,11 +43,13 @@ def test_the_doc_has_real_sessions() -> None:
 
 @pytest.mark.parametrize(("code", "command", "expected"), SESSIONS, ids=[s[1] for s in SESSIONS])
 def test_documented_session_matches_real_output(
-    code: int, command: str, expected: str, monkeypatch: pytest.MonkeyPatch
+    code: int, command: str, expected: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     for name in ("NO_COLOR", "FORCE_COLOR", "TERM"):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.chdir(FIXTURES)
+    work = tmp_path / "fixtures"  # a copy, so a command that saves a file can't touch the repo
+    shutil.copytree(FIXTURES, work)
+    monkeypatch.chdir(work)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
         got = main(shlex.split(command)[1:])
@@ -62,7 +66,9 @@ def _rewrite() -> None:
         os.environ.pop(name, None)
     text = DOC.read_text(encoding="utf-8")
     here = Path.cwd()
-    os.chdir(FIXTURES)
+    tmp = tempfile.TemporaryDirectory()
+    shutil.copytree(FIXTURES, Path(tmp.name) / "fixtures")
+    os.chdir(Path(tmp.name) / "fixtures")
 
     def run(m: re.Match[str]) -> str:
         first = m.group(2).partition("\n")[0]
@@ -76,6 +82,7 @@ def _rewrite() -> None:
         DOC.write_text(BLOCK.sub(run, text), encoding="utf-8")
     finally:
         os.chdir(here)
+        tmp.cleanup()
 
 
 if __name__ == "__main__":

@@ -485,16 +485,48 @@ whose ids don't match exit with code 6, with the counts ("N only in A, M only in
 
 ### 3.5 `report`: one HTML page
 
+<!-- real output (exit 0) -->
 ```console
-$ ask-or-act report support-bot.csv -o report.html
+$ ask-or-act report support-bot-large.csv -o report.html -q
 saved: report.html (1 model, 2,000 labelled rows; opens offline, no external files)
 ```
 
-This is the existing milestone 5 report, fed by the same table. Each threshold row is
-labelled with how its target was chosen:
-- **TARGET**: the user's own `--alpha` or the policy file's α.
+<!-- real output (exit 0) -->
+```console
+$ ask-or-act report support-bot.csv support-bot-large.csv -o compare.html -q
+saved: compare.html (2 models, paired on 1,000 ids; opens offline, no external files)
+```
+
+One file gives one model's page; two or three files give a side-by-side page, paired
+on the same ids as `compare` (different ids exit 6). Everything comes from the public
+API (`report/files.py`); run folders keep the milestone 5 benchmark report. The page:
+
+1. **Summary first:** the exact text of `thresholds` and `metrics` (one file) or of
+   `compare` (several), with the command that prints it. A test compares the page
+   with the terminal word for word (`tests/test_report_files.py`).
+2. **Thresholds:** a table at the TARGET α, plus other α values for context. For
+   several files, each model's `thresholds` text and table, plus the command that
+   chains them into a cascade.
+3. **Calibration and ranking:**
+   - the metrics table with CIs and the ECE noise floor;
+   - the risk–coverage curve on the test half, with the chosen threshold ringed on the
+     curve (a dashed drop shows its coverage) and α as a dashed line;
+   - one reliability diagram per model.
+4. **Unlabelled rows:** how many the threshold would act on, next to its test-half
+   coverage, and when that estimate can be trusted.
+5. **Notes on the input,** and how to read the page.
+
+Each threshold row is labelled with how its target was chosen:
+- **TARGET**: the user's own `--alpha`, or the default (the page says which).
 - **PRE-REGISTERED**: only for benchmark runs whose config registered α in advance.
+  A user's file never gets it.
 - **EXPLORATORY**: every other α shown.
+
+The page is one file with inline styles and SVG charts. It loads no scripts, fonts or
+images from elsewhere (tested), and holds ids, file names and numbers, never input
+text. Too few labelled rows still gives a page (exit 0); the page shows what's needed
+and stderr says so. Examples from the fixtures: `reports/examples/` (not committed;
+regenerate with the commands above).
 
 ### 3.6 `gate` (milestone 6): pass or fail in CI
 
@@ -918,7 +950,8 @@ Each step gets its own commit, after the author's approval.
   the 100,000-row measurement.
 - **(b)** *(done 2026-11-23)* `thresholds`, `metrics` and `compare` on
   predictions files, with the public API (`find_thresholds`, `evaluate`, `compare`).
-- **(c)** `report` on predictions files.
+- **(c)** *(built, awaiting approval)* `report` on predictions files, with
+  `aoa.write_report`.
 - **(d)** `demo`, with a timing test under 30 s.
 - **(e)** `gate` (milestone 6).
 

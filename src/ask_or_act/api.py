@@ -45,6 +45,16 @@ class NotEnoughData(ValueError):  # noqa: N818 - a domain error, named as the do
         self.have, self.need, self.typical, self.hint = have, need, typical, hint
         super().__init__(f"{have} labelled calibration rows; a guarantee needs at least {need}")
 
+    def explain(self, alpha: float, delta: float) -> list[str]:
+        """What the CLI prints (the first line is the error) and the report shows."""
+        typical = f"; with errors on α/2 of them, about {self.typical:,}" if self.typical else ""
+        return [
+            f"too few labelled calibration rows for a guarantee at α = {alpha:g}, δ = {delta:g}.",
+            f"  You have {self.have:,}. Even if the model made no mistakes, the test needs at "
+            f"least {self.need:,} rows the model acts on{typical}.",
+            f"  hint: {self.hint}",
+        ]
+
 
 def _plain(x: dict[str, Any]) -> dict[str, JSON]:
     """numpy arrays and scalars → lists and floats; NaN → None (JSON has no NaN)."""
@@ -84,8 +94,23 @@ def halves(t: DecisionTable) -> dict[str, DecisionTable]:
     return {h.split: h for h in t.by_split() if h.split is not None}
 
 
+def split_how(table: DecisionTable, split_seed: int = 0) -> str:
+    """How the calibration/test halves were chosen, as the headers say it."""
+    return {
+        "column": "split column",
+        "hash": f"hashed split, seed {split_seed}",
+        "run": "saved runs",
+    }.get(table.split_source, "as given")
+
+
 def _pct(x: float | None, digits: int = 0) -> str:
     return "—" if x is None or math.isnan(x) else f"{x:.{digits}%}"
+
+
+def share_text(x: float) -> str:
+    """A share that must not round to 0%: whole percents from 1%, else two significant
+    digits (an escalation floor of 0.04% is still a floor)."""
+    return f"{x:.0%}" if x >= 0.01 or x <= 0 else f"{x * 100:.2g}%"
 
 
 def _range(lo: float, hi: float) -> str:
@@ -202,7 +227,7 @@ class Thresholds:
         if self.min_escalation > 0:
             out.append(
                 f"  No rule can reach α = {a} without escalating at least "
-                f"{_pct(self.min_escalation)} of decisions."
+                f"{share_text(self.min_escalation)} of decisions."
             )
         return "\n".join(out)
 
@@ -625,6 +650,71 @@ def compare(
     return Comparison(names, rows, len(sa), report, (ths[0], ths[1]), alpha)
 
 
+# --------------------------------------------------------------------------- report
+
+
+def write_report(
+    data: Data | Sequence[Data],
+    out: str | Path,
+    *,
+    alpha: float | None = None,
+    delta: float = DEFAULT_DELTA,
+    rows: Rows = "test",
+    n_boot: int = 2000,
+    seed: int = 0,
+    bins: int = 15,
+    title: str | None = None,
+    **read_options: Any,
+) -> Path:
+    """One static HTML page (report/files.py): one model, or two or three side by side
+    on the same ids. ``alpha`` is the TARGET (default 0.1). Returns the path written."""
+    from ask_or_act.report import files
+
+    sources: list[Data] = list(data) if isinstance(data, list | tuple) else [data]  # type: ignore[list-item]
+    loaded = [load(d, **read_options) for d in sources]
+    opts = files.Options(
+        alpha=DEFAULT_ALPHA if alpha is None else alpha,
+        delta=delta,
+        alpha_given=alpha is not None,
+        rows=rows,
+        n_boot=n_boot,
+        seed=seed,
+        bins=bins,
+        split_seed=int(read_options.get("split_seed", 0)),
+    )
+    page = files.build(loaded, opts, title=title)
+    path = Path(out)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(page.html, encoding="utf-8")
+    return path
+
+
+# --------------------------------------------------------------------------- headers
+# The first line of each command's text output. The CLI and the HTML report both use
+# these, so the report's summary is the terminal's, word for word.
+
+
+def thresholds_header(tables: Sequence[DecisionTable], th: Thresholds, how: str) -> str:
+    names = ", ".join(t.source or t.name for t in tables)
+    joined = "joined on id; " if len(tables) > 1 else ""
+    return (
+        f"{names}: {joined}{th.n_cal:,} calibration / {th.n_test or 0:,} test labelled rows ({how})"
+    )
+
+
+def metrics_header(table: DecisionTable, ev: Evaluation) -> str:
+    which = (
+        "all labelled rows" if ev.rows == "all" else "test half (--all scores every labelled row)"
+    )
+    failed = f"; {ev.n_errors:,} failed decisions count as wrong" if ev.n_errors else ""
+    return f"{table.source or table.name}, {which}: {ev.n:,} labelled rows{failed}"
+
+
+def compare_header(cmp: Comparison) -> str:
+    which = "test-half" if cmp.rows == "test" else "labelled"
+    return f"Paired on {cmp.n:,} {which} ids in both files: A = {cmp.names[0]}, B = {cmp.names[1]}."
+
+
 __all__ = [
     "Comparison",
     "Evaluation",
@@ -634,4 +724,5 @@ __all__ = [
     "evaluate",
     "find_thresholds",
     "load",
+    "write_report",
 ]

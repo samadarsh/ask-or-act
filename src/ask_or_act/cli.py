@@ -22,7 +22,7 @@ DEFAULT_SAMPLES_DIR = Path("data/samples")
 
 
 LOCAL_ONLY = (
-    "The analysis commands (check, thresholds, metrics, compare) run locally: "
+    "The analysis commands (check, thresholds, metrics, compare, report) run locally: "
     "no network connections, no telemetry."
 )
 DOCS = "https://github.com/samadarsh/ask-or-act/blob/main/docs/cli-design.md"
@@ -166,6 +166,19 @@ runs locally: no network connections, no telemetry.
 docs: {DOCS}
 """
 
+REPORT_EPILOG = f"""\
+examples:
+  # one model: thresholds, reliability, risk-coverage, unlabelled coverage
+  ask-or-act report preds.csv -o report.html
+
+  # two models side by side, paired on the same ids
+  ask-or-act report small.csv large.csv -o compare.html --alpha 0.05
+
+exit codes: 0 saved, 2 usage, 6 bad input (e.g. the files cover different ids).
+runs locally: no network connections, no telemetry; the page loads nothing external.
+docs: {DOCS}
+"""
+
 CHECK_EPILOG = """\
 examples:
   # is my file usable, and what does it support?
@@ -281,10 +294,43 @@ def build_parser() -> argparse.ArgumentParser:
         help="score this recorded signal as the confidence, e.g. "
         "verbalized, token_logprob, verbalized_logprob, self_consistency, native",
     )
-    rep = sub.add_parser("report", help="one static HTML report for a set of runs (no calls)")
-    rep.add_argument("runs", nargs="+", type=Path, help="runs/<id> ...")
-    rep.add_argument("--out", type=Path, default=Path("reports/report.html"), help="HTML path")
-    rep.add_argument("--title", default="ask-or-act report")
+    rep = sub.add_parser(
+        "report",
+        help="one static HTML report (predictions files, or runs); opens offline",
+        description="One static HTML page. One predictions file: its thresholds at your "
+        "TARGET alpha, the reliability diagram, the risk-coverage curve with the threshold "
+        "marked, and coverage on unlabelled rows. Two or three files: side by side, paired "
+        "on the same ids (as compare). Run folders keep the benchmark report.",
+        epilog=REPORT_EPILOG,
+        parents=[_input_flags()],
+        **opts,
+    )
+    rep.add_argument(
+        "runs",
+        nargs="+",
+        type=Path,
+        metavar="FILE_OR_RUN",
+        help="predictions file(s), or runs/<id> ...",
+    )
+    rep.add_argument(
+        "-o", "--out", type=Path, default=Path("reports/report.html"), help="HTML path"
+    )
+    rep.add_argument("--title", help="page title")
+    rep.add_argument(
+        "--alpha",
+        type=_unit_interval,
+        help="files: the TARGET risk (default 0.1); run folders use their registered target",
+    )
+    rep.add_argument(
+        "--delta", type=_unit_interval, default=0.1, help="files: failure probability (default 0.1)"
+    )
+    rep.add_argument("--all", action="store_true", help="files: score every labelled row")
+    rep.add_argument("--seed", type=int, default=0, help="files: bootstrap seed")
+    rep.add_argument("--bins", type=int, default=15, help="files: calibration bins (default 15)")
+    rep.add_argument("-q", "--quiet", action="store_true", help="only the saved line and errors")
+    rep.add_argument(
+        "--color", choices=("auto", "always", "never"), default="auto", help="colour on stderr"
+    )
     rep.add_argument("--raw-dir", type=Path, default=Path("data/raw"), help="for MT-Bench lengths")
     rep.add_argument(
         "--seen-ids",
@@ -496,13 +542,16 @@ def _run_report(args: argparse.Namespace) -> int:
     from ask_or_act.metrics.report import Settings
     from ask_or_act.report.build import write_report
 
+    if args.alpha is not None or args.all:
+        print("error: --alpha and --all apply to predictions files only", file=sys.stderr)
+        return 2
     try:
         out = write_report(
             args.runs,
             args.out,
             raw_dir=args.raw_dir,
             seen_path=args.seen_ids,
-            title=args.title,
+            title=args.title or "ask-or-act report",
             settings=Settings(n_boot=args.n_boot),
         )
     except (FileNotFoundError, ValueError) as exc:
@@ -751,26 +800,11 @@ def _emit(args: argparse.Namespace, header: str, result: Any, command: str, inpu
         print(summaries.wrap(f"{header}\n\n{result.summary()}"))
 
 
-def _split_how(table: Any, args: argparse.Namespace) -> str:
-    return {
-        "column": "split column",
-        "hash": f"hashed split, seed {args.split_seed}",
-        "run": "saved runs",
-    }.get(table.split_source, "as given")
-
-
 def _not_enough(out: _Out, exc: Any, alpha: float, delta: float) -> None:
-    typical = f"; with errors on α/2 of them, about {exc.typical:,}" if exc.typical else ""
-    out.say(
-        out.err.error(
-            f"too few labelled calibration rows for a guarantee at α = {alpha:g}, δ = {delta:g}."
-        )
-    )
-    out.say(
-        f"  You have {exc.have:,}. Even if the model made no mistakes, the test needs at "
-        f"least {exc.need:,} rows the model acts on{typical}."
-    )
-    out.say(f"  hint: {exc.hint}")
+    first, *rest = exc.explain(alpha, delta)
+    out.say(out.err.error(first))
+    for line in rest:
+        out.say(line)
 
 
 def _run_thresholds_files(args: argparse.Namespace) -> int:
@@ -806,12 +840,8 @@ def _run_thresholds_files(args: argparse.Namespace) -> int:
         for p in exc.problems:
             out.problem(p)
         return exit_codes.BAD_INPUT
-    names = ", ".join(t.source or t.name for t in cal)
-    how = "--cal/--test files" if test else _split_how(cal[0], args)
-    joined = "joined on id; " if len(cal) > 1 else ""
-    header = (
-        f"{names}: {joined}{th.n_cal:,} calibration / {th.n_test or 0:,} test labelled rows ({how})"
-    )
+    how = "--cal/--test files" if test else api.split_how(cal[0], args.split_seed)
+    header = api.thresholds_header(cal, th, how)
     inputs = {"sources": [t.source or t.name for t in cal], "split": how}
     _emit(args, header, th, "thresholds", inputs)
     return exit_codes.OK
@@ -838,9 +868,7 @@ def _run_metrics_file(args: argparse.Namespace) -> int:
             out.problem(p)
         return exit_codes.BAD_INPUT
     t = tables[0]
-    which = "all labelled rows" if rows == "all" else "test half (--all scores every labelled row)"
-    failed = f"; {ev.n_errors:,} failed decisions count as wrong" if ev.n_errors else ""
-    header = f"{t.source or t.name}, {which}: {ev.n:,} labelled rows{failed}"
+    header = api.metrics_header(t, ev)
     _emit(args, header, ev, "metrics", {"source": t.source or t.name, "rows": rows})
     if args.out:
         from ask_or_act import summaries
@@ -872,11 +900,50 @@ def _run_compare(args: argparse.Namespace) -> int:
         for p in exc.problems:
             out.problem(p)
         return exit_codes.BAD_INPUT
-    which = "test-half" if rows == "test" else "labelled"
-    header = (
-        f"Paired on {cmp.n:,} {which} ids in both files: A = {cmp.names[0]}, B = {cmp.names[1]}."
-    )
+    header = api.compare_header(cmp)
     _emit(args, header, cmp, "compare", {"a": str(args.a), "b": str(args.b), "rows": rows})
+    return exit_codes.OK
+
+
+def _run_report_files(args: argparse.Namespace) -> int:
+    from ask_or_act import api, exit_codes, predictions
+    from ask_or_act.report import files
+
+    out = _Out(args)
+    if not 1 <= len(args.runs) <= files.MAX_FILES:
+        print(
+            out.err.error(
+                f"give 1 to {files.MAX_FILES} predictions files (got {len(args.runs)}); "
+                "one chart keeps at most that many curves apart"
+            ),
+            file=sys.stderr,
+        )
+        return exit_codes.USAGE
+    tables = _load_tables(args.runs, args, out)
+    if isinstance(tables, int):
+        return tables
+    opts = files.Options(
+        alpha=api.DEFAULT_ALPHA if args.alpha is None else args.alpha,
+        delta=args.delta,
+        alpha_given=args.alpha is not None,
+        rows="all" if args.all else "test",
+        n_boot=args.n_boot,
+        seed=args.seed,
+        bins=args.bins,
+        split_seed=args.split_seed,
+    )
+    try:
+        page = files.build([api.Loaded(t) for t in tables], opts, title=args.title)
+    except predictions.InputError as exc:
+        for p in exc.problems:
+            out.problem(p)
+        return exit_codes.BAD_INPUT
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(page.html, encoding="utf-8")
+    if not args.quiet:
+        for note in page.notes:
+            out.say(out.err.warning(note))
+    print(files.saved_line(args.out, page))
     return exit_codes.OK
 
 
@@ -951,6 +1018,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "compare":
         return _guarded(_run_compare, args)
     if args.command == "report":
+        if _is_predictions(args.runs):
+            return _guarded(_run_report_files, args)
         return _run_report(args)
     if args.command == "judge":
         return _run_judge(args)

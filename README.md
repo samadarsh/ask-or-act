@@ -11,8 +11,8 @@ Python toolkit that evaluates and calibrates those decisions.
 
 > **Status:** milestones 0–5 work: data, core, metrics, deciders, guaranteed thresholds,
 > judge mode and the HTML report. The benchmark study is running. The "bring your own
-> predictions" CLI is being built: `check`, `thresholds`, `metrics` and `compare` work;
-> `report` and `demo` are next ([docs/cli-design.md](docs/cli-design.md)).
+> predictions" CLI is being built: `check`, `thresholds`, `metrics`, `compare` and
+> `report` work; `demo` is next ([docs/cli-design.md](docs/cli-design.md)).
 
 ## What it will do
 
@@ -39,17 +39,19 @@ ask-or-act check preds.csv              # is the file usable, and what does it s
 ask-or-act thresholds preds.csv         # act above what confidence? (with a guarantee)
 ask-or-act metrics preds.csv            # accuracy, calibration, ranking, with 95% CIs
 ask-or-act compare a.csv b.csv          # is B better than A? paired tests, same ids
+ask-or-act report preds.csv -o r.html   # one HTML page: summary, charts, thresholds
 ```
 
 `check` reports every problem at once, with line numbers and the flag that fixes it.
 For example, it suggests `--confidence-scale percent` for 0–100 scores, and
 `--confidence-of positive` for P(positive class). Every command prints a short summary,
 or one JSON document with `--json`. The same functions are a Python API
-(`aoa.find_thresholds`, `aoa.evaluate`, `aoa.compare`). `report` and `demo` come next;
-[docs/cli-design.md](docs/cli-design.md) has the design.
+(`aoa.find_thresholds`, `aoa.evaluate`, `aoa.compare`, `aoa.write_report`). `demo`
+comes next; [docs/cli-design.md](docs/cli-design.md) has the design.
 
-**Runs locally.** The analysis commands (`check`, `thresholds`, `metrics`, `compare`) make no
-network connections and send no telemetry. A test enforces this
+**Runs locally.** The analysis commands (`check`, `thresholds`, `metrics`, `compare`,
+`report`) make no network connections and send no telemetry, and the report page loads
+nothing from elsewhere. A test enforces this
 (`tests/test_local_only.py`). Only `run` calls model APIs, and only when you approve
 the cost.
 
