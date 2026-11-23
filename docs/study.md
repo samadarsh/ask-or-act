@@ -120,11 +120,17 @@ The pinned settings match the decider config recorded in every pilot run's `run.
 `scripts/study-job.sh` runs the study once a day without asking, as a macOS launchd job.
 
 **When it runs:**
-- At 10:00 local time, at most once per UTC day. Groq's daily limits reset at 00:00 UTC.
+- A run is due when none has started since the most recent 10:00 local slot. So it
+  runs at 10:00 daily.
 - A 10:00 missed while the Mac slept runs on wake. One missed while it was off runs at
-  the next login, and an hourly check backs that up.
-- Any study log started that UTC day counts as the day's run, including a manual
-  `scripts/daily.sh` run, so a run is never repeated.
+  the next login, and an hourly check backs that up. After such a catch-up the normal
+  10:00 run still happens, so the job is back on its slot the same day.
+- Any study log counts as a run, including a manual `scripts/daily.sh` run: one started
+  after 10:00 is that day's run; one started before 10:00 doesn't replace the 10:00 run.
+- There is no daily reset to wait for. Groq's allowance refills gradually (200,000
+  tokens per 24 h; docs/deciders.md), so a short gap only means a smaller run, and
+  nothing is lost unless more than 24 h pass between runs. While the Mac is on, that
+  never happens (replay tests in `tests/test_study_job.py`).
 - If a study run is already in progress, the job skips.
 
 **Isolation from development:** the job runs from a separate git worktree,
@@ -183,6 +189,11 @@ pin carries only what the study job needs, not later analysis work on `main`.
   so `due` saw no runs and the job would have run hourly (`find -H`). `install` now
   works from the main folder. No change to configs, prompts, decider resolution,
   cache keys or example selection.
+- `study-v3` (a0ee280, 2026-11-23 UTC): study-v2 plus the job-script change only. The
+  due check dropped its "at most once per UTC day" rule, which assumed a reset at
+  00:00 UTC that doesn't exist. Under it, a catch-up between 05:30 and 10:00 local
+  skipped that day's 10:00 run and moved the job to ~05:30 for good. Now a run is due
+  when none has started since the last 10:00 slot. Same exclusions as study-v2.
 
 ## Approved schedule (2026-11-21 UTC; measured tokens, 90% of each model's limits)
 
