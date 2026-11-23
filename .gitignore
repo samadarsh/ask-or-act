@@ -36,3 +36,6 @@ logs/
 /logs
 /.cache
 /data/raw
+
+# `ask-or-act demo` output when run from the repo root
+ask-or-act-demo*/

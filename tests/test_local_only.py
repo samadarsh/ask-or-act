@@ -38,6 +38,7 @@ COMMANDS: list[list[str]] = [
         "--n-boot",
         "50",
     ],
+    ["demo", "--dir", "{tmp}/demo"],
     ["check", str(FIXTURES / "scores.csv"), "--json"],
     [
         "check",

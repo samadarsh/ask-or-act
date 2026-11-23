@@ -22,7 +22,7 @@ DEFAULT_SAMPLES_DIR = Path("data/samples")
 
 
 LOCAL_ONLY = (
-    "The analysis commands (check, thresholds, metrics, compare, report) run locally: "
+    "The analysis commands (check, thresholds, metrics, compare, report, demo) run locally: "
     "no network connections, no telemetry."
 )
 DOCS = "https://github.com/samadarsh/ask-or-act/blob/main/docs/cli-design.md"
@@ -204,7 +204,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ask-or-act",
         description="Evaluate and calibrate AI decisions: when to act, ask, or escalate.",
-        epilog=f"{LOCAL_ONLY}\nNew here? ask-or-act check --help",
+        epilog=f"{LOCAL_ONLY}\nNew here? ask-or-act demo",
         **{k: v for k, v in opts.items() if k != "allow_abbrev"},
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -424,6 +424,27 @@ def build_parser() -> argparse.ArgumentParser:
     cmp.add_argument("--n-boot", type=int, default=2000, help="bootstrap resamples (2000)")
     cmp.add_argument("--seed", type=int, default=0, help="bootstrap seed (0)")
     cmp.add_argument("--bins", type=int, default=15, help="calibration bins (15)")
+
+    dem = sub.add_parser(
+        "demo",
+        help="example data and a report in a new folder, in seconds (local, no network)",
+        description="Write a synthetic predictions file (a support-ticket router whose model "
+        "is overconfident; no text, no download) and its HTML report into a new folder, "
+        "and print what thresholds and metrics say about it.",
+        epilog=LOCAL_ONLY,
+        **opts,
+    )
+    dem.add_argument(
+        "--dir",
+        type=Path,
+        default=Path("ask-or-act-demo"),
+        help="folder to create (default ask-or-act-demo; never overwritten: -2, -3, ... if it "
+        "exists)",
+    )
+    dem.add_argument("-q", "--quiet", action="store_true", help="only the saved lines")
+    dem.add_argument(
+        "--color", choices=("auto", "always", "never"), default="auto", help="colour on stderr"
+    )
 
     study = sub.add_parser("study", help="run a multi-day schedule of configs, one day at a time")
     study_sub = study.add_subparsers(dest="study_command", required=True)
@@ -948,6 +969,68 @@ def _run_report_files(args: argparse.Namespace) -> int:
     return exit_codes.OK
 
 
+def _run_demo(args: argparse.Namespace) -> int:
+    import shlex
+
+    from ask_or_act import api, demo, exit_codes, summaries
+    from ask_or_act.report import files
+
+    out = _Out(args)
+    folder = demo.new_folder(args.dir)
+    data = demo.write_data(folder)
+    n = demo.N_LABELLED + demo.N_NEW
+    if args.quiet:
+        print(f"saved: {data}")
+    else:
+        print(
+            summaries.wrap(
+                f"Wrote {data}: {n:,} synthetic predictions from a support-ticket router "
+                f"({demo.N_LABELLED:,} with a human label, {demo.N_NEW:,} new tickets without "
+                f"one). Ids, labels and scores only, generated from seed {demo.SEED}; no download."
+            )
+        )
+    table = api.load(data).table  # its one warning (the unlabelled rows) is said above
+    if not args.quiet:
+        th = api.find_thresholds([table])
+        ev = api.evaluate(table)
+        how = api.split_how(table)
+        for header, result in (
+            (api.thresholds_header([table], th, how), th),
+            (api.metrics_header(table, ev), ev),
+        ):
+            print()
+            print(summaries.wrap(f"{header}\n\n{result.summary()}"))
+    opts = files.Options(
+        alpha=api.DEFAULT_ALPHA,
+        delta=api.DEFAULT_DELTA,
+        alpha_given=False,
+        rows="test",
+        n_boot=2000,
+        seed=0,
+        bins=15,
+        split_seed=0,
+    )
+    page = files.build([api.Loaded(table)], opts, title=demo.TITLE)
+    report = folder / demo.REPORT_NAME
+    report.write_text(page.html, encoding="utf-8")
+    if not args.quiet:
+        for note in page.notes:
+            out.say(out.err.warning(note))
+        print()
+    print(files.saved_line(report, page))
+    if not args.quiet:
+        q = shlex.quote(str(data))
+        print(
+            "\nTry next:\n"
+            f"  ask-or-act check {q}\n"
+            f"  ask-or-act thresholds {q} --alpha 0.05   # stricter target, less coverage\n"
+            f"  ask-or-act metrics {q}\n"
+            "Your own file needs: id, prediction, confidence, human_label "
+            "(ask-or-act check --help)."
+        )
+    return exit_codes.OK
+
+
 def _guarded(run: Callable[[argparse.Namespace], int], args: argparse.Namespace) -> int:
     """New commands: Ctrl-C exits 130 at once; a crash exits 70 with a report link,
     never 1, so CI can't mistake a bug for a failed gate."""
@@ -1022,6 +1105,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         if _is_predictions(args.runs):
             return _guarded(_run_report_files, args)
         return _run_report(args)
+    if args.command == "demo":
+        return _guarded(_run_demo, args)
     if args.command == "judge":
         return _run_judge(args)
     if args.command == "study":

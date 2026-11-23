@@ -11,8 +11,8 @@ Python toolkit that evaluates and calibrates those decisions.
 
 > **Status:** milestones 0–5 work: data, core, metrics, deciders, guaranteed thresholds,
 > judge mode and the HTML report. The benchmark study is running. The "bring your own
-> predictions" CLI is being built: `check`, `thresholds`, `metrics`, `compare` and
-> `report` work; `demo` is next ([docs/cli-design.md](docs/cli-design.md)).
+> predictions" CLI is being built: `check`, `thresholds`, `metrics`, `compare`,
+> `report` and `demo` work; the CI `gate` is next ([docs/cli-design.md](docs/cli-design.md)).
 
 ## What it will do
 
@@ -34,7 +34,12 @@ Give it a CSV, TSV or JSONL file with one row per decision: `id`, `prediction`,
 `confidence` (the model's probability that its answer is right) and `human_label`.
 Optionally add `options`, `split` and `group`.
 
+New here? `ask-or-act demo` writes a synthetic example file (an overconfident
+support-ticket router; no text, no download) and its HTML report into a new folder in
+about a second, and prints what the other commands say about it.
+
 ```sh
+ask-or-act demo                         # example data + report in ./ask-or-act-demo/
 ask-or-act check preds.csv              # is the file usable, and what does it support?
 ask-or-act thresholds preds.csv         # act above what confidence? (with a guarantee)
 ask-or-act metrics preds.csv            # accuracy, calibration, ranking, with 95% CIs
@@ -46,11 +51,11 @@ ask-or-act report preds.csv -o r.html   # one HTML page: summary, charts, thresh
 For example, it suggests `--confidence-scale percent` for 0–100 scores, and
 `--confidence-of positive` for P(positive class). Every command prints a short summary,
 or one JSON document with `--json`. The same functions are a Python API
-(`aoa.find_thresholds`, `aoa.evaluate`, `aoa.compare`, `aoa.write_report`). `demo`
-comes next; [docs/cli-design.md](docs/cli-design.md) has the design.
+(`aoa.find_thresholds`, `aoa.evaluate`, `aoa.compare`, `aoa.write_report`).
+[docs/cli-design.md](docs/cli-design.md) has the design.
 
 **Runs locally.** The analysis commands (`check`, `thresholds`, `metrics`, `compare`,
-`report`) make no network connections and send no telemetry, and the report page loads
+`report`, `demo`) make no network connections and send no telemetry, and the report page loads
 nothing from elsewhere. A test enforces this
 (`tests/test_local_only.py`). Only `run` calls model APIs, and only when you approve
 the cost.

@@ -558,30 +558,60 @@ own design and isn't fixed here.
 
 ### 3.7 `demo`: something working in under 30 seconds
 
+<!-- real output (exit 0) -->
 ```console
 $ ask-or-act demo
-Wrote ask-or-act-demo/support-tickets.csv: 2,000 synthetic predictions (ids, labels
-  and scores only; generated from seed 0, no download).
+Wrote ask-or-act-demo/support-tickets.csv: 2,500 synthetic predictions from a
+  support-ticket router (2,000 with a human label, 500 new tickets without one). Ids,
+  labels and scores only, generated from seed 0; no download.
 
-Act when confidence ≥ 0.84; ask a human below. Covers 71% of decisions.
-  ...
-saved: ask-or-act-demo/report.html
+support-tickets.csv: 985 calibration / 1,015 test labelled rows (hashed split, seed 0)
+
+Act when confidence ≥ 0.925; ask a human below. Covers 59% of decisions.
+
+  Guarantee: at most 10% of acted-on decisions are wrong (α = 0.1), unless the
+    calibration sample was unlucky, which has probability ≤ 10% (δ = 0.1).
+  Test check: 7.7% wrong when acting [5.7%–10.1%], covering 59%: within α.
+  Unlabelled rows: this would act on 323 of 500 (65%).
+  No rule can reach α = 0.1 without escalating at least 3% of decisions.
+
+support-tickets.csv, test half (--all scores every labelled row): 1,015 labelled rows
+
+Accuracy 82.3% [79.9%–84.5%]. Agreement with humans: κ = 0.80 [0.77–0.82].
+Calibration: confidence overstates accuracy by about 8 points (mean confidence 90.0%).
+  ECE 0.079 [0.062–0.103]; a perfectly calibrated model would show about 0.021 at this n
+    (95th percentile 0.031), so this is beyond noise.
+Ranking: the most confident half is 92.6% right; AUROC 0.77 [0.74–0.81].
+Confidence has 295 distinct values.
+
+saved: ask-or-act-demo/report.html (1 model, 2,000 labelled rows; opens offline, no external files)
 
 Try next:
   ask-or-act check ask-or-act-demo/support-tickets.csv
-  ask-or-act thresholds ask-or-act-demo/support-tickets.csv --alpha 0.05
+  ask-or-act thresholds ask-or-act-demo/support-tickets.csv --alpha 0.05   # stricter target, less coverage
+  ask-or-act metrics ask-or-act-demo/support-tickets.csv
+Your own file needs: id, prediction, confidence, human_label (ask-or-act check --help).
 ```
 
-**Demo data:**
+The summaries are the same text `thresholds` and `metrics` print for the file (a test
+checks it). The report is `report` on the same file, titled as the demo.
+
+**Demo data** (`src/ask_or_act/demo.py`):
 - It's generated, not downloaded: a fixed-seed simulation of a ticket router whose
-  model is **realistically overconfident**. Its stated confidence runs about 8–10
-  points above its accuracy at the top. So the demo shows a calibration warning,
-  and a threshold that acts on part of the data and asks a human for the rest. This keeps the wheel small and avoids any licence
-  question. It contains no text at all.
+  model is **realistically overconfident**. Each ticket's chance of being routed right,
+  p, comes from Beta(5, 1); the stated confidence is p pushed outward on the log-odds
+  scale (logit(conf) = 1.3·logit(p) + 0.4, plus noise). Confidence overstates accuracy
+  by about 8 points, so the demo shows a calibration warning, and a threshold that
+  acts on part of the data (59%) and asks a human for the rest. Confidences are spread
+  out, with no pile-up at one value. It contains no text at all, which keeps the wheel
+  small and avoids any licence question.
+- 2,000 labelled tickets and 500 new, unlabelled ones, so the report also shows the
+  coverage estimate on unlabelled data. No split column: the hashed split is used, as
+  for most users' files.
 - It never overwrites an existing folder: if one exists, the demo writes
-  `ask-or-act-demo-2/`.
-- The 30-second budget is a CI test. If the demo takes longer, lower the number of
-  bootstrap resamples for the demo, and say so in its output.
+  `ask-or-act-demo-2/` (then `-3`, …). `--dir` picks another name.
+- The 30-second budget is a CI test. The demo takes about 1 s with the full 2,000
+  bootstrap resamples, so it doesn't lower them.
 
 ### 3.8 Benchmark commands (unchanged)
 
@@ -950,9 +980,9 @@ Each step gets its own commit, after the author's approval.
   the 100,000-row measurement.
 - **(b)** *(done 2026-11-23)* `thresholds`, `metrics` and `compare` on
   predictions files, with the public API (`find_thresholds`, `evaluate`, `compare`).
-- **(c)** *(built, awaiting approval)* `report` on predictions files, with
+- **(c)** *(done 2026-11-23)* `report` on predictions files, with
   `aoa.write_report`.
-- **(d)** `demo`, with a timing test under 30 s.
+- **(d)** *(done 2026-11-24)* `demo`, with a timing test under 30 s.
 - **(e)** `gate` (milestone 6).
 
 As each command lands, its mock-up session in §3 becomes *real output*, pinned by
