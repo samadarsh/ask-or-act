@@ -51,3 +51,36 @@ def test_documented_session_matches_real_output(
         got = main(shlex.split(command)[1:])
     assert buf.getvalue().rstrip() == expected.rstrip()
     assert got == code
+
+
+def _rewrite() -> None:
+    """Refresh every real-output block from the real commands (after an intended change;
+    review the diff before committing)."""
+    import os
+
+    for name in ("NO_COLOR", "FORCE_COLOR", "TERM"):
+        os.environ.pop(name, None)
+    text = DOC.read_text(encoding="utf-8")
+    here = Path.cwd()
+    os.chdir(FIXTURES)
+
+    def run(m: re.Match[str]) -> str:
+        first = m.group(2).partition("\n")[0]
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            code = main(shlex.split(first[2:])[1:])
+        body = buf.getvalue().rstrip()
+        return f"<!-- real output (exit {code}) -->\n```console\n{first}\n{body}\n```"
+
+    try:
+        DOC.write_text(BLOCK.sub(run, text), encoding="utf-8")
+    finally:
+        os.chdir(here)
+
+
+if __name__ == "__main__":
+    import sys
+
+    if sys.argv[1:] == ["--write"]:
+        _rewrite()
+        print(f"rewrote the real-output blocks in {DOC}")

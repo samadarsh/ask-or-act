@@ -76,6 +76,7 @@ class DecisionTable:
     source: str = ""  # provenance shown in the report: a git commit or a file name
     target: Target | None = None  # the PRE-REGISTERED target, if one exists
     grid: GridChoice = field(default_factory=continuous_grid)  # fixed before the data
+    split_source: str = ""  # "column", "hash" (predictions files) or "run" (saved runs)
     key: str = ""  # unique id within a report; defaults to name + split
     order: str = ""  # sort key: the latest table of a decider and split wins
 
@@ -191,6 +192,7 @@ def from_run(path: Path) -> DecisionTable:
         grid=grid_for_run(record, None),
         key=str(path),
         order=path.name,
+        split_source="run",
     )
 
 

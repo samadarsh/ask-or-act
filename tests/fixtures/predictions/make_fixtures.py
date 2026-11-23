@@ -106,6 +106,28 @@ def tiny(rng: np.random.Generator) -> list[dict[str, str]]:
     ]
 
 
+def large(rng: np.random.Generator, small: list[dict[str, str]]) -> list[dict[str, str]]:
+    """A stronger, better-calibrated model on the same rows as support-bot.csv (same ids,
+    labels, split and failures), for compare and cascade examples."""
+    n = len(small)
+    skill = rng.uniform(0.55, 1.0, n)
+    correct = rng.uniform(size=n) < skill
+    conf = np.clip(skill + rng.normal(0, 0.03, n), 0.3, 0.999).round(3)
+    out = []
+    for i, row in enumerate(small):
+        g = row["human_label"] or str(rng.choice(INTENTS))
+        pred = g if correct[i] else str(rng.choice([x for x in INTENTS if x != g]))
+        failed = row["prediction"] == ""
+        out.append(
+            {
+                **row,
+                "prediction": "" if failed else pred,
+                "confidence": "" if failed else f"{conf[i]:.3f}",
+            }
+        )
+    return out
+
+
 def _write_csv(path: Path, rows: list[dict[str, str]]) -> None:
     with path.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0]), lineterminator="\n")
@@ -115,12 +137,14 @@ def _write_csv(path: Path, rows: list[dict[str, str]]) -> None:
 
 def main() -> None:
     rng = np.random.default_rng(20261122)
-    _write_csv(HERE / "support-bot.csv", support_bot(rng))
+    small = support_bot(rng)
+    _write_csv(HERE / "support-bot.csv", small)
     _write_csv(HERE / "scores.csv", scores(rng))
     with (HERE / "moderation.jsonl").open("w", encoding="utf-8") as f:
         for row in moderation(rng):
             f.write(json.dumps(row) + "\n")
     _write_csv(HERE / "pilot.csv", tiny(rng))
+    _write_csv(HERE / "support-bot-large.csv", large(rng, small))  # last: keeps the others
 
 
 if __name__ == "__main__":

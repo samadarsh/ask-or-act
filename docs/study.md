@@ -165,8 +165,9 @@ scripts/study-job.sh install   # (re)write the plist and load the job
    `tests/test_study_freeze.py`. The freeze test is the guard: if the fix changed
    any config's resolved settings, request bodies or selected ids, it fails. It is
    never re-pinned without the author's approval.
-2. Tag the fixed commit with the next number and the reason:
-   `git tag -a study-v2 -m "why" <commit>`.
+2. Tag the fixed commit with the next number and the reason, and push the tag right
+   away, so every pin is recorded on GitHub:
+   `git tag -a study-v2 -m "why" <commit> && git push origin study-v2`.
 3. `scripts/study-job.sh setup` moves the worktree to `study-v2` and syncs its
    environment. Then run `scripts/study-job.sh install`, so the plist matches.
 4. Record the move and its reason in this file.

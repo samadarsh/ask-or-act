@@ -43,6 +43,35 @@ def check_json(r: CheckResult) -> dict[str, JSON]:
     )
 
 
+def wrap(text: str, width: int = 88) -> str:
+    """Wrap long lines for a terminal, continuing each under its own indent + 2."""
+    import textwrap
+
+    lines = []
+    for line in text.splitlines():
+        if len(line) <= width:
+            lines.append(line)
+            continue
+        indent = line[: len(line) - len(line.lstrip())]
+        lines.append(
+            textwrap.fill(
+                line.strip(),
+                width=width,
+                initial_indent=indent,
+                subsequent_indent=indent + "  ",
+                break_on_hyphens=False,
+                break_long_words=False,
+            )
+        )
+    return "\n".join(lines)
+
+
+def to_jsonable(x: object) -> object:
+    from ask_or_act.metrics.report import to_jsonable as convert
+
+    return convert(x)
+
+
 def _hint(text: str, indent: str) -> list[str]:
     return [f"{indent}hint: {text}"] if text else []
 

@@ -77,9 +77,16 @@ class Step:
     threshold: float
     n: int  # calibration examples emitted (confidence >= threshold)
     errors: int
-    upper_bound: float  # ToE Eq. (4) at level δ
     p_value: float
-    certified: bool
+    certified: bool  # p_value <= δ: the test; the upper bound below is for reporting
+    delta: float
+
+    @property
+    def upper_bound(self) -> float:
+        """ToE Eq. (4) at level δ. Computed on first use only: it's for reports, and a
+        bisection over a binomial sum is slow for large emit sets. R̂⁺ ≤ α ⇔ p ≤ δ, so
+        it never changes a decision (binomial.py)."""
+        return upper_bound(self.errors, self.n, self.delta)
 
 
 @dataclass(frozen=True)
@@ -138,7 +145,7 @@ def fixed_sequence(
         last = (n, errors)
         p = p_value(errors, n, alpha)
         passed = p <= delta
-        steps.append(Step(lam, n, errors, upper_bound(errors, n, delta), p, passed))
+        steps.append(Step(lam, n, errors, p, passed, delta))
         if not passed:
             break
         threshold = lam

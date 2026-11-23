@@ -113,6 +113,28 @@ def ece(
     return float(sum(b.weight / total * abs(b.accuracy - b.mean_confidence) for b in bins))
 
 
+def ece_fast(
+    confidence: FloatArray,
+    correct: BoolArray,
+    *,
+    n_bins: int = DEFAULT_BINS,
+    strategy: Binning = "width",
+) -> float:
+    """``ece`` without weights, in two bincounts (for the bootstrap's inner loop).
+
+    Σ_b (n_b / n) · |acc_b − conf_b| = Σ_b |Σ_b correct − Σ_b confidence| / n, over the
+    same bins as ``ece``. Equal to it up to float rounding (tests/test_metrics_speed.py).
+    """
+    n = len(confidence)
+    if n == 0:
+        return float("nan")
+    ids = bin_ids(confidence, n_bins, strategy)
+    size = int(ids.max()) + 1
+    hits = np.bincount(ids, weights=correct.astype(np.float64), minlength=size)
+    conf = np.bincount(ids, weights=confidence, minlength=size)
+    return float(np.abs(hits - conf).sum() / n)
+
+
 @dataclass(frozen=True)
 class NoiseFloor:
     """ECE that a *perfectly calibrated* decider would get by chance alone."""
@@ -149,8 +171,15 @@ def ece_noise_floor(
     onehot = np.zeros((n, int(ids.max()) + 1))
     onehot[np.arange(n), ids] = 1.0
     conf_per_bin = confidence @ onehot
-    z = np.random.default_rng(seed).random((n_sim, n)) < confidence
-    sims = np.abs(z.astype(np.float64) @ onehot - conf_per_bin).sum(axis=1) / n
+    rng = np.random.default_rng(seed)
+    # In chunks of simulations: the same draws as one (n_sim, n) array, in the same
+    # order (tests/test_metrics_speed.py), without holding n_sim·n numbers at once.
+    chunk = max(1, 2_000_000 // n)
+    parts = []
+    for start in range(0, n_sim, chunk):
+        z = rng.random((min(chunk, n_sim - start), n)) < confidence
+        parts.append(np.abs(z.astype(np.float64) @ onehot - conf_per_bin).sum(axis=1) / n)
+    sims = np.concatenate(parts)
     return NoiseFloor(float(sims.mean()), float(np.quantile(sims, 0.95)), n_sim)
 
 

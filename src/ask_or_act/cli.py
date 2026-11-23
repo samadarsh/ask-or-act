@@ -11,7 +11,7 @@ import json
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from ask_or_act import __version__
 from ask_or_act.data import manifest
@@ -21,8 +21,11 @@ DEFAULT_RAW_DIR = Path("data/raw")
 DEFAULT_SAMPLES_DIR = Path("data/samples")
 
 
-LOCAL_ONLY = "The analysis commands (check) run locally: no network connections, no telemetry."
-NEW_COMMANDS = ("check",)
+LOCAL_ONLY = (
+    "The analysis commands (check, thresholds, metrics, compare) run locally: "
+    "no network connections, no telemetry."
+)
+DOCS = "https://github.com/samadarsh/ask-or-act/blob/main/docs/cli-design.md"
 
 
 def _parser_options() -> dict[str, Any]:
@@ -124,6 +127,45 @@ def _input_flags() -> argparse.ArgumentParser:
     return p
 
 
+THRESHOLDS_EPILOG = f"""\
+examples:
+  # act above what confidence, at most 10% wrong (the default alpha)?
+  ask-or-act thresholds preds.csv
+
+  # a stricter target
+  ask-or-act thresholds preds.csv --alpha 0.05
+
+  # cheap model first, strong model second, then a human
+  ask-or-act thresholds small.csv large.csv
+
+exit codes: 0 done (even "act on nothing"), 6 bad input, 7 too few labelled rows.
+runs locally: no network connections, no telemetry.
+docs: {DOCS}
+"""
+
+METRICS_EPILOG = f"""\
+examples:
+  # the test half (the calibration half is for fitting thresholds)
+  ask-or-act metrics preds.csv
+
+  # every labelled row
+  ask-or-act metrics preds.csv --all --json
+
+exit codes: 0 done, 6 bad input.
+runs locally: no network connections, no telemetry.
+docs: {DOCS}
+"""
+
+COMPARE_EPILOG = f"""\
+examples:
+  ask-or-act compare small.csv large.csv
+  ask-or-act compare small.csv large.csv --json | jq .result.tests
+
+exit codes: 0 done, 6 bad input (e.g. the files cover different ids).
+runs locally: no network connections, no telemetry.
+docs: {DOCS}
+"""
+
 CHECK_EPILOG = """\
 examples:
   # is my file usable, and what does it support?
@@ -203,8 +245,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--raw-dir", type=Path, default=DEFAULT_RAW_DIR)
 
-    met = sub.add_parser("metrics", help="metrics for a run, or a paired comparison of two")
-    met.add_argument("runs", nargs="+", type=Path, help="runs/<id> [runs/<id2>]")
+    met = sub.add_parser(
+        "metrics",
+        help="accuracy, calibration and ranking with 95%% CIs (a predictions file, or runs)",
+        description="Accuracy, Cohen's kappa, calibration (ECE with its noise floor, Brier) "
+        "and ranking (AURC, AUROC), with 95%% bootstrap CIs. A predictions file is scored on "
+        "its test half (--all: every labelled row). Run folders keep the benchmark report.",
+        epilog=METRICS_EPILOG,
+        parents=[_input_flags(), _output_flags()],
+        **opts,
+    )
+    met.add_argument(
+        "runs",
+        nargs="+",
+        type=Path,
+        metavar="FILE_OR_RUN",
+        help="a predictions file, or runs/<id> [runs/<id2>]",
+    )
+    met.add_argument(
+        "--all", action="store_true", help="score every labelled row, not the test half"
+    )
     met.add_argument("--bins", type=int, default=15, help="calibration bins (default 15)")
     met.add_argument("--n-boot", type=int, default=2000, help="bootstrap resamples")
     met.add_argument("--seed", type=int, default=0, help="bootstrap seed")
@@ -238,14 +298,27 @@ def build_parser() -> argparse.ArgumentParser:
     jud.add_argument("--raw-dir", type=Path, default=Path("data/raw"), help="for answer lengths")
     thr = sub.add_parser(
         "thresholds",
-        help="act/ask/escalate thresholds with a risk guarantee (fit on calibration runs)",
+        help="act/ask/escalate thresholds with a risk guarantee (a predictions file, or runs)",
+        description="Find the confidence above which a model can act, with a guarantee: with "
+        "probability at least 1 - delta, at most alpha of acted-on decisions are wrong. "
+        "Fitted on the calibration half, checked on the test half. Two or more files make a "
+        "cascade (cheapest first, joined on id).",
+        epilog=THRESHOLDS_EPILOG,
+        parents=[_input_flags(), _output_flags()],
+        **opts,
+    )
+    thr.add_argument(
+        "files",
+        nargs="*",
+        type=Path,
+        metavar="FILE",
+        help="predictions file(s); 2+ make a cascade, cheapest first",
     )
     thr.add_argument(
         "--cal",
         nargs="+",
         type=Path,
-        required=True,
-        help="calibration-half run(s), cheapest first; 2+ runs make a cascade",
+        help="calibration half: run folder(s), or predictions file(s) used whole",
     )
     thr.add_argument(
         "--test", nargs="+", type=Path, help="the same deciders' test-half runs, same order"
@@ -286,6 +359,25 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="cascade: calibrate each stage on its own share of the calibration set",
     )
+
+    cmp = sub.add_parser(
+        "compare",
+        help="is model B better than model A? paired tests on the same ids (local, no network)",
+        description="Paired comparison of two models' predictions on the same ids (test half "
+        "by default): exact McNemar for accuracy, a centered paired bootstrap for the other "
+        "metrics, Holm-adjusted, and what each would act on at alpha.",
+        epilog=COMPARE_EPILOG,
+        parents=[_input_flags(), _output_flags()],
+        **opts,
+    )
+    cmp.add_argument("a", type=Path, metavar="FILE_A", help="model A's predictions")
+    cmp.add_argument("b", type=Path, metavar="FILE_B", help="model B's predictions")
+    cmp.add_argument("--all", action="store_true", help="every labelled row, not the test half")
+    cmp.add_argument("--alpha", type=_unit_interval, default=0.1, help="target risk (default 0.1)")
+    cmp.add_argument("--delta", type=_unit_interval, default=0.1, help="failure probability (0.1)")
+    cmp.add_argument("--n-boot", type=int, default=2000, help="bootstrap resamples (2000)")
+    cmp.add_argument("--seed", type=int, default=0, help="bootstrap seed (0)")
+    cmp.add_argument("--bins", type=int, default=15, help="calibration bins (15)")
 
     study = sub.add_parser("study", help="run a multi-day schedule of configs, one day at a time")
     study_sub = study.add_subparsers(dest="study_command", required=True)
@@ -572,6 +664,222 @@ def _run_check(args: argparse.Namespace) -> int:
     return exit_codes.OK
 
 
+def _is_predictions(paths: Sequence[Path]) -> bool:
+    """A file (or stdin) rather than a run folder."""
+    return any(str(p) == "-" or not p.is_dir() for p in paths)
+
+
+def _read_options(args: argparse.Namespace) -> dict[str, Any]:
+    from ask_or_act import predictions
+
+    return {
+        "format": args.format,
+        "columns": args.columns,
+        "confidence_scale": predictions.Scale.parse(args.confidence_scale),
+        "confidence_of": args.confidence_of,
+        "positive": args.positive,
+        "split_seed": args.split_seed,
+        "cal_fraction": args.cal_fraction,
+        "split_map": args.split_map,
+    }
+
+
+class _Out:
+    """stdout for the result, stderr for everything else (docs/cli-design.md §5.2)."""
+
+    def __init__(self, args: argparse.Namespace) -> None:
+        from ask_or_act import term
+
+        self.args = args
+        self.err = term.Painter(term.use_color(sys.stderr, args.color))
+
+    def say(self, text: str) -> None:
+        from ask_or_act import summaries
+
+        print(summaries.wrap(text), file=sys.stderr)
+
+    def problem(self, p: Any, where: str = "") -> None:
+        msg = f"{where}: {p.message}" if where else p.message
+        self.say(self.err.error(msg) if p.severity == "error" else self.err.warning(msg))
+        if p.hint:
+            self.say(f"  hint: {p.hint}")
+
+    def warnings(self, problems: Sequence[Any], where: str = "") -> None:
+        if not self.args.quiet:
+            for p in problems:
+                self.problem(p, where)
+
+
+# Facts the result already states; repeating them as warnings is noise.
+_QUIET_WARNINGS = frozenset({"few_calibration", "small_test"})
+
+
+def _load_tables(paths: Sequence[Path], args: argparse.Namespace, out: _Out) -> list[Any] | int:
+    """Read every file (all problems shown), or return the exit code."""
+    from ask_or_act import api, exit_codes, predictions
+
+    try:
+        opts = _read_options(args)
+    except ValueError as exc:
+        print(out.err.error(str(exc)), file=sys.stderr)
+        return exit_codes.USAGE
+    tables = []
+    failed = False
+    for path in paths:
+        source: Any = sys.stdin if str(path) == "-" else path
+        try:
+            loaded = api.load(source, **opts)
+        except predictions.InputError as exc:
+            failed = True
+            for p in exc.problems:
+                if p.severity == "error":
+                    out.problem(p, path.name)
+            out.say(f"  (ask-or-act check {path} shows every problem)")
+            continue
+        out.warnings([w for w in loaded.warnings if w.code not in _QUIET_WARNINGS], path.name)
+        tables.append(loaded.table)
+    return exit_codes.BAD_INPUT if failed else tables
+
+
+def _emit(args: argparse.Namespace, header: str, result: Any, command: str, inputs: Any) -> None:
+    from ask_or_act import summaries
+
+    if args.json:
+        doc = summaries.envelope(command, result.to_json(), [], inputs)
+        print(json.dumps(summaries.to_jsonable(doc), indent=2, ensure_ascii=False))
+    else:
+        print(summaries.wrap(f"{header}\n\n{result.summary()}"))
+
+
+def _split_how(table: Any, args: argparse.Namespace) -> str:
+    return {
+        "column": "split column",
+        "hash": f"hashed split, seed {args.split_seed}",
+        "run": "saved runs",
+    }.get(table.split_source, "as given")
+
+
+def _not_enough(out: _Out, exc: Any, alpha: float, delta: float) -> None:
+    typical = f"; with errors on α/2 of them, about {exc.typical:,}" if exc.typical else ""
+    out.say(
+        out.err.error(
+            f"too few labelled calibration rows for a guarantee at α = {alpha:g}, δ = {delta:g}."
+        )
+    )
+    out.say(
+        f"  You have {exc.have:,}. Even if the model made no mistakes, the test needs at "
+        f"least {exc.need:,} rows the model acts on{typical}."
+    )
+    out.say(f"  hint: {exc.hint}")
+
+
+def _run_thresholds_files(args: argparse.Namespace) -> int:
+    from ask_or_act import api, exit_codes, predictions
+
+    out = _Out(args)
+    if args.files and args.cal:
+        print(out.err.error("give files, or --cal/--test, not both"), file=sys.stderr)
+        return exit_codes.USAGE
+    if args.signal or args.mt_bench_unit != "comparison":
+        print(
+            out.err.error("--signal and --mt-bench-unit apply to run folders only"),
+            file=sys.stderr,
+        )
+        return exit_codes.USAGE
+    cal = _load_tables(args.files or args.cal, args, out)
+    if isinstance(cal, int):
+        return cal
+    test = None
+    if args.test:
+        loaded = _load_tables(args.test, args, out)
+        if isinstance(loaded, int):
+            return loaded
+        test = loaded
+    alpha = 0.1 if args.alpha is None else args.alpha
+    delta = 0.1 if args.delta is None else args.delta
+    try:
+        th = api.find_thresholds(cal, alpha=alpha, delta=delta, test=test, disjoint=args.disjoint)
+    except api.NotEnoughData as exc:
+        _not_enough(out, exc, alpha, delta)
+        return exit_codes.NOT_ENOUGH_DATA
+    except predictions.InputError as exc:
+        for p in exc.problems:
+            out.problem(p)
+        return exit_codes.BAD_INPUT
+    names = ", ".join(t.source or t.name for t in cal)
+    how = "--cal/--test files" if test else _split_how(cal[0], args)
+    joined = "joined on id; " if len(cal) > 1 else ""
+    header = (
+        f"{names}: {joined}{th.n_cal:,} calibration / {th.n_test or 0:,} test labelled rows ({how})"
+    )
+    inputs = {"sources": [t.source or t.name for t in cal], "split": how}
+    _emit(args, header, th, "thresholds", inputs)
+    return exit_codes.OK
+
+
+def _run_metrics_file(args: argparse.Namespace) -> int:
+    from ask_or_act import api, exit_codes, predictions
+
+    out = _Out(args)
+    if len(args.runs) != 1:
+        print(
+            out.err.error("give one predictions file; to compare two: ask-or-act compare A B"),
+            file=sys.stderr,
+        )
+        return exit_codes.USAGE
+    tables = _load_tables(args.runs, args, out)
+    if isinstance(tables, int):
+        return tables
+    rows: Literal["test", "all"] = "all" if args.all else "test"
+    try:
+        ev = api.evaluate(tables[0], rows=rows, n_boot=args.n_boot, seed=args.seed, bins=args.bins)
+    except predictions.InputError as exc:
+        for p in exc.problems:
+            out.problem(p)
+        return exit_codes.BAD_INPUT
+    t = tables[0]
+    which = "all labelled rows" if rows == "all" else "test half (--all scores every labelled row)"
+    failed = f"; {ev.n_errors:,} failed decisions count as wrong" if ev.n_errors else ""
+    header = f"{t.source or t.name}, {which}: {ev.n:,} labelled rows{failed}"
+    _emit(args, header, ev, "metrics", {"source": t.source or t.name, "rows": rows})
+    if args.out:
+        from ask_or_act import summaries
+
+        args.out.write_text(json.dumps(summaries.to_jsonable(ev.to_json()), indent=2))
+    return exit_codes.OK
+
+
+def _run_compare(args: argparse.Namespace) -> int:
+    from ask_or_act import api, exit_codes, predictions
+
+    out = _Out(args)
+    tables = _load_tables([args.a, args.b], args, out)
+    if isinstance(tables, int):
+        return tables
+    rows: Literal["test", "all"] = "all" if args.all else "test"
+    try:
+        cmp = api.compare(
+            tables[0],
+            tables[1],
+            rows=rows,
+            alpha=args.alpha,
+            delta=args.delta,
+            n_boot=args.n_boot,
+            seed=args.seed,
+            bins=args.bins,
+        )
+    except predictions.InputError as exc:
+        for p in exc.problems:
+            out.problem(p)
+        return exit_codes.BAD_INPUT
+    which = "test-half" if rows == "test" else "labelled"
+    header = (
+        f"Paired on {cmp.n:,} {which} ids in both files: A = {cmp.names[0]}, B = {cmp.names[1]}."
+    )
+    _emit(args, header, cmp, "compare", {"a": str(args.a), "b": str(args.b), "rows": rows})
+    return exit_codes.OK
+
+
 def _guarded(run: Callable[[argparse.Namespace], int], args: argparse.Namespace) -> int:
     """New commands: Ctrl-C exits 130 at once; a crash exits 70 with a report link,
     never 1, so CI can't mistake a bug for a failed gate."""
@@ -631,9 +939,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "run":
         return _run_run(args)
     if args.command == "metrics":
+        if _is_predictions(args.runs):
+            return _guarded(_run_metrics_file, args)
         return _run_metrics(args)
     if args.command == "thresholds":
+        if args.files or (args.cal and _is_predictions(args.cal)):
+            return _guarded(_run_thresholds_files, args)
+        if not args.cal:
+            parser.error("give a predictions file, or --cal run folder(s)")
         return _run_thresholds(args)
+    if args.command == "compare":
+        return _guarded(_run_compare, args)
     if args.command == "report":
         return _run_report(args)
     if args.command == "judge":

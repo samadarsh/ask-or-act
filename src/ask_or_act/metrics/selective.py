@@ -20,7 +20,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ask_or_act.metrics.data import BoolArray, FloatArray
+from ask_or_act.metrics.data import BoolArray, FloatArray, IntArray
 
 
 @dataclass(frozen=True)
@@ -86,3 +86,52 @@ def auroc(confidence: FloatArray, correct: BoolArray) -> float | None:
 
 def n_unique(confidence: FloatArray) -> int:
     return len(np.unique(confidence))
+
+
+class ConfidenceLevels:
+    """The distinct confidence values, sorted once, so a resample's AURC and AUROC are
+    bincounts instead of a sort (for the bootstrap's inner loop).
+
+    A resample only changes how many examples sit at each level, so the stepwise
+    risk–coverage curve is the same sums in the same order; levels absent from a
+    resample add zero-width steps, which are skipped. Equal to ``aurc``,
+    ``excess_aurc`` and ``auroc`` (tests/test_metrics_speed.py).
+    """
+
+    def __init__(self, confidence: FloatArray, correct: BoolArray) -> None:
+        levels, inverse = np.unique(-confidence, return_inverse=True)  # descending c
+        self.down = inverse.astype(np.intp)  # level index, most confident first
+        self.up = (len(levels) - 1 - inverse).astype(np.intp)  # least confident first
+        self.size = len(levels)
+        self.wrong = (~correct).astype(np.float64)
+        self.right = correct.astype(np.float64)
+
+    def aurc(self, idx: IntArray) -> float:
+        n = len(idx)
+        if n == 0:
+            return float("nan")
+        block_n = np.bincount(self.down[idx], minlength=self.size).astype(np.float64)
+        block_err = np.bincount(self.down[idx], weights=self.wrong[idx], minlength=self.size)
+        cum_n, cum_err = np.cumsum(block_n), np.cumsum(block_err)
+        present = block_n > 0
+        return float((block_n[present] / n * (cum_err[present] / cum_n[present])).sum())
+
+    def excess_aurc(self, idx: IntArray) -> float:
+        n = len(idx)
+        if n == 0:
+            return float("nan")
+        wrong = float(self.wrong[idx].sum())
+        oracle = (wrong / n) ** 2  # right answers first (risk 0), then all the wrong ones
+        return self.aurc(idx) - oracle
+
+    def auroc(self, idx: IntArray) -> float | None:
+        n_pos = int(self.right[idx].sum())
+        n_neg = len(idx) - n_pos
+        if n_pos == 0 or n_neg == 0:
+            return None
+        count = np.bincount(self.up[idx], minlength=self.size).astype(np.float64)
+        pos = np.bincount(self.up[idx], weights=self.right[idx], minlength=self.size)
+        start = np.cumsum(count) - count  # 0-based index of each level's first member
+        avg_rank = start + (count + 1) / 2.0
+        u = float((pos * avg_rank).sum()) - n_pos * (n_pos + 1) / 2.0
+        return float(u / (n_pos * n_neg))

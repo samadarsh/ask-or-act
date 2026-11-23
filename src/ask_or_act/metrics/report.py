@@ -17,23 +17,24 @@ from ask_or_act.metrics import ace, mt_bench
 from ask_or_act.metrics.calibration import (
     DEFAULT_BINS,
     brier_top_label,
-    ece,
+    ece_fast,
     ece_noise_floor,
     reliability,
 )
-from ask_or_act.metrics.classification import cohen_kappa, confusion_matrix, label_set, macro_f1
+from ask_or_act.metrics.classification import LabelCodes, confusion_matrix, label_set
 from ask_or_act.metrics.data import ERROR_LABEL, IntArray, Scored, align
 from ask_or_act.metrics.feasibility import min_abstention
-from ask_or_act.metrics.selective import aurc, auroc, excess_aurc, n_unique, risk_coverage
+from ask_or_act.metrics.selective import ConfidenceLevels, n_unique, risk_coverage
 from ask_or_act.metrics.stats import (
     DEFAULT_N_BOOT,
     DEFAULT_SEED,
     Stat,
     bootstrap_ci,
+    bootstrap_cis,
     holm,
+    iter_resamples,
     mcnemar,
-    paired_bootstrap,
-    resamples,
+    paired_bootstraps,
 )
 
 LOWER_IS_BETTER = frozenset(
@@ -70,18 +71,23 @@ def _groups(s: Scored) -> tuple[str, ...] | None:
 
 
 def stats_for(s: Scored, n_bins: int) -> dict[str, Stat]:
-    gold, pred = np.array(s.gold), np.array(s.pred)
+    """Each metric as a function of resampled example indices. The label metrics and
+    ECE use the vectorized forms (LabelCodes, ece_fast), equal to macro_f1,
+    cohen_kappa and ece; the selective ones ConfidenceLevels, equal to aurc, excess_aurc
+    and auroc (tests/test_metrics_speed.py)."""
+    codes = LabelCodes(s.gold, s.pred)
     c, z = s.confidence, s.correct
+    levels = ConfidenceLevels(c, z)
     fns: dict[str, Stat] = {
         "accuracy": lambda i: float(z[i].mean()),
-        "macro_f1": lambda i: macro_f1(gold[i], pred[i]),
-        "cohen_kappa": lambda i: cohen_kappa(gold[i], pred[i]),
-        "ece_width": lambda i: ece(c[i], z[i], n_bins=n_bins, strategy="width"),
-        "ece_mass": lambda i: ece(c[i], z[i], n_bins=n_bins, strategy="mass"),
+        "macro_f1": codes.macro_f1,
+        "cohen_kappa": codes.cohen_kappa,
+        "ece_width": lambda i: ece_fast(c[i], z[i], n_bins=n_bins, strategy="width"),
+        "ece_mass": lambda i: ece_fast(c[i], z[i], n_bins=n_bins, strategy="mass"),
         "brier": lambda i: brier_top_label(c[i], z[i]),
-        "aurc": lambda i: aurc(c[i], z[i]),
-        "excess_aurc": lambda i: excess_aurc(c[i], z[i]),
-        "auroc": lambda i: auroc(c[i], z[i]),
+        "aurc": levels.aurc,
+        "excess_aurc": levels.excess_aurc,
+        "auroc": levels.auroc,
         "mean_confidence": lambda i: float(c[i].mean()),
     }
     # Multiclass Brier, when every decision has a probability vector: precompute
@@ -118,12 +124,20 @@ CONFIDENCE_METRICS = (
 def _metrics_with_ci(
     s: Scored, settings: Settings, only: Sequence[str] | None = None
 ) -> dict[str, dict[str, Any]]:
-    kw = {"n_boot": settings.n_boot, "seed": settings.seed, "level": settings.level}
-    return {
-        name: _ci_dict(bootstrap_ci(fn, len(s), groups=_groups(s), **kw))  # type: ignore[arg-type]
+    fns = {
+        name: fn
         for name, fn in stats_for(s, settings.n_bins).items()
         if only is None or name in only
     }
+    cis = bootstrap_cis(
+        fns,
+        len(s),
+        n_boot=settings.n_boot,
+        seed=settings.seed,
+        level=settings.level,
+        groups=_groups(s),
+    )
+    return {name: _ci_dict(ci) for name, ci in cis.items()}
 
 
 def noise_floors(s: Scored, settings: Settings) -> dict[str, dict[str, float]]:
@@ -211,13 +225,16 @@ def compare_report(
 ) -> dict[str, Any]:
     a, b = align(a, b)
     n, groups = len(a), _groups(a)
-    kw = {"n_boot": settings.n_boot, "seed": settings.seed, "level": settings.level}
     fa, fb = stats_for(a, settings.n_bins), stats_for(b, settings.n_bins)
-    paired = {
-        name: asdict(paired_bootstrap(fa[name], fb[name], n, groups=groups, **kw))  # type: ignore[arg-type]
-        for name in fa
-        if name in fb
-    }
+    results = paired_bootstraps(
+        {name: (fa[name], fb[name]) for name in fa if name in fb},
+        n,
+        n_boot=settings.n_boot,
+        seed=settings.seed,
+        level=settings.level,
+        groups=groups,
+    )
+    paired = {name: asdict(r) for name, r in results.items()}
     mc = mcnemar(a.correct, b.correct)
     family = [m for m in FAMILY if m in paired]
     raw_p = [mc.p_value if m == "accuracy" else paired[m]["p_value"] for m in family]
@@ -256,10 +273,9 @@ def ace_section(a: Scored, b: Scored, settings: Settings) -> dict[str, Any]:
     inst = ace.candidate_instances(a, b)
     point = ace.all_views(a, b, n_bins=settings.n_bins, strategy="width", inst=inst)
     boot: dict[str, dict[str, list[float]]] = {v: {"ece": [], "brier": []} for v in point}
-    idxs: list[IntArray] = resamples(
+    for idx in iter_resamples(
         len(a), n_boot=settings.n_boot, seed=settings.seed, groups=_groups(a)
-    )
-    for idx in idxs:
+    ):
         for name, view in ace.all_views(
             a, b, n_bins=settings.n_bins, strategy="width", idx=idx, inst=inst
         ).items():

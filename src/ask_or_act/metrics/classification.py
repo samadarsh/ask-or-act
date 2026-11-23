@@ -56,3 +56,46 @@ def cohen_kappa(a: Labels, b: Labels) -> float | None:
     if p_e >= 1.0:
         return None
     return float((p_o - p_e) / (1.0 - p_e))
+
+
+class LabelCodes:
+    """Labels encoded once as integers, so the bootstrap's inner loop is one bincount
+    per resample instead of a Python loop over every example.
+
+    ``macro_f1`` and ``cohen_kappa`` here equal the functions above on the resampled
+    labels (tests/test_metrics_speed.py): classes absent from a resample are left out
+    of the macro average exactly as ``label_set`` leaves them out, and contribute
+    nothing to κ's chance agreement.
+    """
+
+    def __init__(self, y_true: Labels, y_pred: Labels) -> None:
+        labels = label_set(y_true, y_pred)
+        index = {lb: i for i, lb in enumerate(labels)}
+        self.k = len(labels)
+        self.t = np.fromiter((index[x] for x in y_true), dtype=np.int64, count=len(y_true))
+        self.p = np.fromiter((index[x] for x in y_pred), dtype=np.int64, count=len(y_pred))
+
+    def confusion(self, idx: npt.NDArray[np.intp]) -> npt.NDArray[np.float64]:
+        k = self.k
+        cells = np.bincount(self.t[idx] * k + self.p[idx], minlength=k * k)
+        return cells.reshape(k, k).astype(np.float64)
+
+    def macro_f1(self, idx: npt.NDArray[np.intp]) -> float:
+        m = self.confusion(idx)
+        tp = np.diag(m)
+        denom = m.sum(axis=0) + m.sum(axis=1)
+        present = denom > 0
+        if not present.any():
+            return float("nan")
+        return float((2 * tp[present] / denom[present]).sum() / present.sum())
+
+    def cohen_kappa(self, idx: npt.NDArray[np.intp]) -> float | None:
+        if len(idx) == 0:
+            return None
+        m = self.confusion(idx)
+        n = m.sum()
+        p_o = np.trace(m) / n
+        p_e = float((m.sum(axis=0) * m.sum(axis=1)).sum() / n**2)
+        if p_e >= 1.0:
+            return None
+        return float((p_o - p_e) / (1.0 - p_e))

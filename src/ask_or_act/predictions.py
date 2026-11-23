@@ -49,6 +49,7 @@ ALIASES: dict[str, tuple[str, ...]] = {
 }
 FORMATS = {".csv": "csv", ".tsv": "tsv", ".jsonl": "jsonl", ".ndjson": "jsonl"}
 SPLITS = ("calibration", "test")
+BENCHMARKS = ("banking77", "aegis", "mt_bench")  # dataset names with special handling
 SHOW_LINES = 5  # line numbers shown per problem
 SNIPPET = 20  # characters of a bad cell shown in a message
 SUSPICIOUS_SHARE = 0.05  # share of answered rows below 1/k that triggers the warning
@@ -1012,7 +1013,16 @@ def _check_rows(
             )
         )
         stem = Path(label).stem if label not in ("stdin", "columns") else label
-        out["table"] = DecisionTable(name=stem, dataset=stem, rows=rows, source=label, grid=grid)
+        # A user file named like a benchmark must not get that benchmark's handling.
+        dataset = f"{stem} (file)" if stem in BENCHMARKS else stem
+        out["table"] = DecisionTable(
+            name=stem,
+            dataset=dataset,
+            rows=rows,
+            source=label,
+            grid=grid,
+            split_source=out["split_source"],
+        )
     return out
 
 

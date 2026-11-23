@@ -51,7 +51,9 @@ def test_too_many_runs(tmp_path: Path) -> None:
 
 
 def test_missing_run(tmp_path: Path) -> None:
-    assert main(["metrics", str(tmp_path / "nope")]) == 2
+    # A path that doesn't exist is read as a predictions file: bad input, exit 6
+    # (docs/cli-design.md §5.1, approved 2026-11-22).
+    assert main(["metrics", str(tmp_path / "nope")]) == 6
 
 
 def test_signal_option_scores_a_recorded_signal(

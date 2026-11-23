@@ -352,100 +352,136 @@ Ready for metrics and report.
 
 ### 3.2 `thresholds`: when to act
 
+Real output on the fixture files, which are synthetic: `support-bot.csv` is an overconfident
+8-intent router (65% accurate), and `support-bot-large.csv` a stronger, better-calibrated
+model on the same rows. Warnings about the input go to stderr, and the result goes to stdout.
+
+<!-- real output (exit 0) -->
 ```console
-$ ask-or-act thresholds support-bot.csv
-support-bot.csv: 2,000 labelled rows, split by the split column (1,000 / 1,000)
+$ ask-or-act thresholds support-bot-large.csv
+warning: support-bot-large.csv: 38 rows have an empty prediction (lines 36, 52, 82, 149,
+  208, …): counted as wrong with confidence 0
+warning: support-bot-large.csv: 400 rows have no human_label: used to estimate coverage
+  only
+support-bot-large.csv: 1,000 calibration / 1,000 test labelled rows (split column)
 
-Act when confidence ≥ 0.87; ask a human below. Covers 74% of decisions.
+Act when confidence ≥ 0.879; ask a human below. Covers 28% of decisions.
 
-  Guarantee: at most 10% of acted-on decisions are wrong (α = 0.10), unless the
-  calibration sample was unlucky, which has probability ≤ 10% (δ = 0.10).
-  Test check: 6.1% wrong when acting [95% CI 4.6–7.9%], covering 72%: within α.
-  Unlabelled rows: this threshold would act on 296 of 400 (74%).
-  No threshold can reach α = 0.10 without escalating at least 9% of decisions.
-
-Assumes new data looks like this file. Details: --json, or ask-or-act report support-bot.csv
+  Guarantee: at most 10% of acted-on decisions are wrong (α = 0.1), unless the
+    calibration sample was unlucky, which has probability ≤ 10% (δ = 0.1).
+  Test check: 6.2% wrong when acting [3.6%–9.7%], covering 28%: within α.
+  Unlabelled rows: this would act on 114 of 400 (28%).
+  No rule can reach α = 0.1 without escalating at least 11% of decisions.
 ```
 
-The summary line is the first thing a user sees, and the one they'd paste into a
-ticket. The "at least 9%" line is the Kotte feasibility floor (arXiv:2606.29054 v2,
-Prop. 3).
-
-**Two models (act / ask / escalate):** files are joined on `id`, cheapest first, ordered
-by the user, not by guess.
-
-```console
-$ ask-or-act thresholds small.csv large.csv
-Joined on id: 2,000 labelled rows in both files.
-
-small acts when confidence ≥ 0.91 (58% of decisions);
-otherwise ask large, which acts when ≥ 0.80 (31%);
-escalate the remaining 11% to a human.
-
-  Guarantee: at most 10% wrong among all acted-on decisions (α = 0.10, δ = 0.10,
-  δ split over the two stages).
-  Test check: 7.4% wrong when acting [95% CI 5.9–9.1%], covering 88%: within α.
-```
-
-**Not enough labelled data:** refuse before computing, with exit code 7.
-
-```console
-$ ask-or-act thresholds pilot.csv
-pilot.csv: 40 labelled rows → 20 calibration / 20 test (no split column; see below)
-error: too few labelled calibration rows for a guarantee at α = 0.10, δ = 0.10.
-  You have 20. Even if the model made no mistakes, the test needs at least 36 rows
-  the model acts on; with a realistic error rate (5%) it needs about 114.
-  hint: label more examples, or loosen the target (α = 0.20 needs at least 17).
-```
+The first result line is the answer, the one a user would paste into a ticket. "Covers"
+is the share acted on in the test half. The last line is the Kotte feasibility floor
+(arXiv:2606.29054 v2, Prop. 3): what *any* valid rule must escalate at this α.
 
 **Nothing certified** is a valid answer, not an error: exit 0, and `"certified": false`
-in the JSON.
+in the JSON. The output names the pre-registered scan's closest attempt and how many
+rows it would have needed.
 
+<!-- real output (exit 0) -->
 ```console
-Act on nothing: no confidence threshold keeps errors ≤ 10% with δ = 0.10.
-  Highest-confidence 20% still had 14% errors on calibration. Escalate everything,
-  or try a better-calibrated confidence signal.
+$ ask-or-act thresholds support-bot.csv -q
+support-bot.csv: 1,000 calibration / 1,000 test labelled rows (split column)
+
+Act on nothing: no confidence threshold keeps errors at or below 10% with δ = 0.1.
+  Closest attempt: 130 calibration rows with confidence ≥ 0.999 had 8 wrong (6.2%). At
+    that error rate, proving ≤ 10% with δ = 0.1 takes about 193 such rows.
+  Escalate everything, label more rows, or try a better-calibrated confidence.
 ```
 
-Flags: `--alpha`, `--delta`, `--cal FILE --test FILE` (explicit halves),
-`--split-seed`, `--cal-fraction` (default 0.5), `--confidence-scale
-probability|percent|votes:K`, `--columns`.
+**Two models (act / ask / escalate):** the files are joined on `id`, cheapest first, in
+the order the user gives (never guessed). δ is split over the stages (ToE Algorithm 2).
+
+<!-- real output (exit 0) -->
+```console
+$ ask-or-act thresholds support-bot.csv support-bot-large.csv --alpha 0.2 -q
+support-bot.csv, support-bot-large.csv: joined on id; 1,000 calibration / 1,000 test
+  labelled rows (split column)
+
+support-bot acts when confidence ≥ 0.801 (40% of decisions);
+otherwise ask support-bot-large, which acts when confidence ≥ 0.715 (35% of decisions);
+escalate the remaining 24% to a human.
+
+  Guarantee: at most 20% of acted-on decisions are wrong (α = 0.2), unless the
+    calibration sample was unlucky, which has probability ≤ 10% (δ = 0.1). δ is split
+    over the stages.
+  Test check: 14.4% wrong when acting [12.0%–17.1%], covering 76%: within α.
+  Unlabelled rows: this would act on 329 of 400 (82%).
+  No rule can reach α = 0.2 without escalating at least 15% of decisions.
+```
+
+**Not enough labelled data:** refused before anything is computed, with exit code 7 (§4.4).
+
+<!-- real output (exit 7) -->
+```console
+$ ask-or-act thresholds pilot.csv
+error: too few labelled calibration rows for a guarantee at α = 0.1, δ = 0.1.
+  You have 19. Even if the model made no mistakes, the test needs at least 36 rows the
+    model acts on; with errors on α/2 of them, about 114.
+  hint: label at least 17 more rows, or loosen the target: --alpha 0.2 needs 17
+```
+
+Flags: `--alpha`, `--delta`, `--cal FILE --test FILE` (explicit halves, each used whole),
+`--split-seed`, `--cal-fraction` (default 0.5), `--confidence-scale`, `--confidence-of`,
+`--columns`, `--disjoint`, `--json`, `-q`. With run folders, `--cal RUN --test RUN` keeps
+the benchmark report (pre-registered targets, MT-Bench options).
 
 ### 3.3 `metrics`: how good and how calibrated
 
+<!-- real output (exit 0) -->
 ```console
-$ ask-or-act metrics support-bot.csv
-support-bot.csv, test half (1,000 labelled rows; 38 failed decisions count as wrong)
+$ ask-or-act metrics support-bot.csv -q
+support-bot.csv, test half (--all scores every labelled row): 1,000 labelled rows; 20
+  failed decisions count as wrong
 
-Accuracy 83.2% [80.9–85.4]. Agreement with humans κ = 0.79 [0.76–0.82].
-Calibration: confidence overstates accuracy by about 4 points
-  (ECE 0.041 [0.031–0.058]; a perfectly calibrated model would show ~0.018 at this n).
-Ranking: the most confident 50% are 96.1% right (AURC 0.052).
-Confidence has 1,873 distinct values: thresholds can be fine-grained.
+Accuracy 65.1% [62.2%–68.0%]. Agreement with humans: κ = 0.60 [0.57–0.63].
+Calibration: confidence overstates accuracy by about 8 points (mean confidence 72.8%).
+  ECE 0.078 [0.056–0.105]; a perfectly calibrated model would show about 0.030 at this n
+    (95th percentile 0.043), so this is beyond noise.
+Ranking: the most confident half is 82.8% right; AUROC 0.76 [0.73–0.79].
+Confidence has 465 distinct values.
 ```
 
 The metrics are computed on the **test half**: the calibration half is only for fitting
-thresholds, so it isn't scored here (CLAUDE.md, M2 notes). The first line of the output
-always says which rows were scored. When that's the test half, it adds
-"(--all scores every labelled row)". With `--all`, it says "all labelled rows". `--json` returns every metric with its CI and the noise
-floor.
+thresholds, so it isn't scored here (CLAUDE.md, M2 notes). The first line always says
+which rows were scored; for the test half it adds "(--all scores every labelled row)",
+and with `--all` it says "all labelled rows". "Beyond noise" compares the ECE with the
+95th percentile of what a perfectly calibrated model with the same confidences would
+show at this n (the noise floor). `--json` returns every metric with its CI, the noise
+floor, the reliability bins and the risk–coverage curve. One file only: two files point
+to `compare`.
 
 ### 3.4 `compare`: is model B better than model A?
 
+<!-- real output (exit 0) -->
 ```console
-$ ask-or-act compare gpt-small.csv gpt-large.csv
-Paired on 1,000 test ids present in both files.
+$ ask-or-act compare support-bot.csv support-bot-large.csv -q
+Paired on 1,000 test-half ids in both files: A = support-bot, B = support-bot-large.
 
-gpt-large is more accurate: 86.9% vs 83.2% (+3.7 points [+1.8, +5.6]; exact
-  McNemar p = 0.0003, Holm-adjusted p = 0.001).
-Calibration: no clear difference (ECE −0.006 [−0.019, +0.008]; p = 0.41).
-Brier: gpt-large better (−0.018 [−0.029, −0.007]; p = 0.004).
-At α = 0.10: gpt-large acts on 81% vs 74%.
+support-bot-large is more accurate than support-bot: 75.1% vs 65.1% (+10.0 points [+6.3,
+  +13.9]; exact McNemar p = 5e-07, Holm-adjusted p = 4.5e-06).
+support-bot-large is better on calibration (ECE) than support-bot: 0.022 vs 0.078
+  (-0.056 [-0.073, -0.015]; paired bootstrap p = 0.0005, Holm-adjusted p = 0.004).
+With accuracy controlled (ACE, DA view), support-bot is better calibrated: ECE 0.078 vs
+  0.101 (A − B -0.023 [-0.036, -0.003]); this reverses the raw ECE comparison, which
+  partly reflects accuracy.
+support-bot-large is better on Brier score than support-bot: 0.161 vs 0.188 (-0.028
+  [-0.046, -0.009]; paired bootstrap p = 0.004, Holm-adjusted p = 0.02).
+At α = 0.1: support-bot acts on nothing, support-bot-large acts on 28%.
 ```
 
-The tests are exact McNemar, a centered paired bootstrap and Holm correction, as
-`metrics A B` already uses. A file whose ids don't match exits with code 6 and gives
-counts ("812 ids only in A, 9 only in B").
+The tests are exact McNemar for accuracy, a centered paired bootstrap for the others and
+Holm correction over the metric family, as `metrics RUN_A RUN_B` already uses. The
+"accuracy controlled" line is ACE's DA view (arXiv:2606.30814 v2, §4.2, the paper's
+default). It reweights the more accurate model to the other's accuracy before comparing
+ECE, so higher accuracy alone can't make a model look better calibrated. Here it
+reverses the raw comparison: support-bot-large's lower raw ECE partly reflects its
+higher accuracy. When ACE and raw ECE disagree, the output says so. Files
+whose ids don't match exit with code 6, with the counts ("N only in A, M only in B").
 
 ### 3.5 `report`: one HTML page
 
@@ -880,8 +916,8 @@ Each step gets its own commit, after the author's approval.
 - **(a)** *(done 2026-11-22)* `read_predictions` and `check` (`predictions.py`, `term.py`, the `check`
   command): every error and warning in §4.2, §4.5 and §4.6, the local-only test and
   the 100,000-row measurement.
-- **(b)** `thresholds`, `metrics` and `compare` on predictions files, with the public
-  API (`find_thresholds`, `evaluate`, `compare`).
+- **(b)** *(done 2026-11-23)* `thresholds`, `metrics` and `compare` on
+  predictions files, with the public API (`find_thresholds`, `evaluate`, `compare`).
 - **(c)** `report` on predictions files.
 - **(d)** `demo`, with a timing test under 30 s.
 - **(e)** `gate` (milestone 6).
@@ -904,9 +940,27 @@ row; `tests/test_performance.py` checks a generous limit in CI.
 |---|---|---|---|
 | `check` (CSV, 77 labels, split column) | 100,000 (4.3 MB) | 0.75 s | 176 MB RSS (Python alone: 25 MB); 118 MB Python heap |
 | `check` (JSONL) | 100,000 (9.4 MB) | 0.78 s | 176 MB RSS |
+| `thresholds` | 100,000 (50,000 per half) | 1.1 s | 169 MB RSS |
+| `metrics` (2,000 resamples) | 100,000 (scores the 50,000 test rows) | 10.8 s | 200 MB RSS |
+| `compare` (2,000 resamples, with ACE) | 2 × 100,000 (50,000 paired test rows) | 70 s | 227 MB RSS |
 
 Measured with `/usr/bin/time -l uv run ask-or-act check big.csv`, 2026-11-22. Memory is
 about 1.5 KB per row: the parsed cells, then one `DecisionRow` per row. That's fine at
 this size. If files of 10 million rows become a use case, the fix is columnar storage
 (numpy arrays), not a new format. `tests/test_performance.py` checks under 15 s and
-under 500 MB of Python heap on 100,000 rows.
+under 500 MB of Python heap on 100,000 rows, and `thresholds` + `metrics` + `compare`
+(fewer resamples) under 60 s.
+
+Step (b) made the bootstrap faster without changing any number. Every change is
+pinned by `tests/test_metrics_speed.py` against the original functions:
+- resamples are streamed one at a time, with the same indices as one big draw;
+- all metrics are computed in one pass over the same resamples;
+- labels are integer-coded, so macro-F1 and κ are one bincount per resample;
+- ECE, AURC and AUROC are bincounts over the sorted distinct confidences;
+- the guarantee's upper bound, which is only reported, is computed on demand (the test
+  itself uses the p-value);
+- the ECE noise floor is simulated in chunks.
+
+On 1,000 rows, `metrics` went from 4.6 s to 0.6 s. What's left in `compare` at 100,000
+rows is mostly ACE (about 47 of 70 s), which is still a per-resample Python loop;
+vectorizing it is future work.

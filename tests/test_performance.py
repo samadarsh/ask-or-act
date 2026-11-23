@@ -45,3 +45,22 @@ def test_check_on_100k_rows_is_fast_and_small(tmp_path: Path) -> None:
     _, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
     assert peak / 1e6 < MAX_PEAK_MB, f"peak {peak / 1e6:.0f} MB"
+
+
+def test_thresholds_metrics_and_compare_on_100k_rows(tmp_path: Path) -> None:
+    """Fewer bootstrap resamples than the default (time is linear in them); the doc
+    records the full-default timings."""
+    from ask_or_act import api
+
+    path = tmp_path / "big.csv"
+    _write(path)
+    table = api.load(path).table
+    start = time.perf_counter()
+    th = api.find_thresholds(table)
+    assert th.n_cal + (th.n_test or 0) == N
+    ev = api.evaluate(table, n_boot=100)
+    assert ev.n > 40_000
+    cmp = api.compare(table, table, n_boot=20)
+    assert cmp.n == ev.n
+    elapsed = time.perf_counter() - start
+    assert elapsed < 60.0, f"took {elapsed:.1f} s"

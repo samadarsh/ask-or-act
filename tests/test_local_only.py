@@ -18,6 +18,16 @@ FIXTURES = Path(__file__).parent / "fixtures" / "predictions"
 
 COMMANDS: list[list[str]] = [
     ["check", str(FIXTURES / "support-bot.csv")],
+    ["thresholds", str(FIXTURES / "support-bot-large.csv")],
+    ["thresholds", str(FIXTURES / "support-bot.csv"), str(FIXTURES / "support-bot-large.csv")],
+    ["metrics", str(FIXTURES / "support-bot.csv"), "--n-boot", "50"],
+    [
+        "compare",
+        str(FIXTURES / "support-bot.csv"),
+        str(FIXTURES / "support-bot-large.csv"),
+        "--n-boot",
+        "50",
+    ],
     ["check", str(FIXTURES / "scores.csv"), "--json"],
     [
         "check",
@@ -61,4 +71,4 @@ def test_analysis_commands_make_no_network_calls(
     code = main(argv)
     capsys.readouterr()
     assert no_network == []
-    assert code in (0, 6)  # ran to completion: never a crash (70) from a blocked socket
+    assert code in (0, 6, 7)  # ran to completion: never a crash (70) from a blocked socket
