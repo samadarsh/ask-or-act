@@ -19,10 +19,13 @@
 # unless the worktree is clean, exactly at the newest study-v* tag, and wired to the
 # shared folders. Moving the pin: docs/study.md, "Scheduled runs".
 #
-# When a run is due: at 10:00 local time, once per UTC day (Groq's daily limits reset
-# at 00:00 UTC). A 10:00 missed while the Mac slept or was off runs at the next wake or
-# login, unless a run already started that UTC day. Manual runs (scripts/daily.sh)
-# write logs/<UTC time>-schedule.log too, so they count.
+# When a run is due: when no run has started since the most recent 10:00 local slot.
+# So the job runs at 10:00 daily, and a 10:00 missed while the Mac slept or was off runs
+# at the next wake or login (a catch-up), followed by the normal 10:00 run. There is no
+# daily reset to wait for: Groq's allowance refills gradually (200,000 tokens per 24 h),
+# so a short gap only means a smaller run, and nothing is lost unless more than 24 h
+# pass between runs. Manual runs (scripts/daily.sh) write logs/<UTC time>-schedule.log
+# too, so they count.
 #
 # Safety: free tier only (every config must have [budget] max_usd = 0 and tier = "free";
 # run.py's budget guard also refuses any charged estimate). The study-freeze test must
@@ -70,24 +73,18 @@ run_logs() { # every study log, oldest first (dry runs and launchd.log excluded)
 }
 
 due() { # prints the reason; exit 0 if a run is due
-  local now slot utc_day today last
+  local now slot last
   now="$(now_epoch)"
   slot="$(date -j -r "$now" -v"${HOUR}"H -v0M -v0S +%s)"
   if ((now < slot)); then # before 10:00: the most recent slot was yesterday's
     slot="$(date -j -r "$now" -v-1d -v"${HOUR}"H -v0M -v0S +%s)"
-  fi
-  utc_day="$(date -u -r "$now" +%Y%m%d)"
-  today="$(run_logs | grep "/${utc_day}T" | tail -1 || true)"
-  if [[ -n "$today" ]]; then
-    echo "not due: a run already started today (UTC $utc_day): $today"
-    return 1
   fi
   last="$(run_logs | tail -1)"
   if [[ -n "$last" ]] && (($(log_epoch "$last") >= slot)); then
     echo "not due: the last run ($last) started after the $(date -j -r "$slot" '+%Y-%m-%d %H:%M') slot"
     return 1
   fi
-  echo "due: no run since the $(date -j -r "$slot" '+%Y-%m-%d %H:%M') slot and none today (UTC $utc_day)"
+  echo "due: no run since the $(date -j -r "$slot" '+%Y-%m-%d %H:%M') slot"
 }
 
 running_study() { pgrep -f "ask-or-act study run" || true; }
