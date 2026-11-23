@@ -161,7 +161,7 @@ class PartialRunError(ValueError):
 
 def require_completed(record: RunRecord) -> None:
     """Analysis (metrics, thresholds, judge, report) reads completed runs only. The fix
-    for a partial run is to re-run its config after the reset: everything already
+    for a partial run is to re-run its config later: everything already
     decided comes from the cache, and that new run is saved as completed."""
     status = str(record.metadata.get("status", "unknown"))
     if status == "completed":
@@ -176,5 +176,6 @@ def require_completed(record: RunRecord) -> None:
         f"{record.path.name} is not a completed run "
         f"({partial_text(decided, len(record.decisions), skipped, status)}). "
         f"Only completed runs are analysed: re-run `ask-or-act run {config} --yes` after "
-        "the reset; cached decisions are reused and the new run is complete."
+        "the allowance refills (or let the next scheduled run do it); cached decisions are "
+        "reused and the new run is complete."
     )

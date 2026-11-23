@@ -12,7 +12,10 @@ Safety order. Nothing is called until all of these pass:
 **Daily quotas (free tiers).** If the provider says a per-day limit is used up, the run
 stops cleanly and exits with ``EXIT_QUOTA``. The run is saved with
 ``status = "quota_stopped"``. Every finished decision is already in the cache, so
-re-running the same config after the reset makes only the missing calls.
+re-running the same config later makes only the missing calls. There is no daily
+reset: Groq's allowance refills gradually (its "try again in" times match exactly
+200,000 tokens per 24 h, about 8,333 an hour), so a later run continues with
+whatever has refilled by then.
 """
 
 import asyncio
@@ -276,13 +279,15 @@ def run_from_config(
         print(f"first error: {first.example_id}: {first.error}", file=sys.stderr)
     out(f"saved run: {run_dir}")
     if outcome.quota_stopped:
-        wait = outcome.quota_retry_after_s
+        # No "retry in" here: Groq's wait is for the next request only (seconds), not
+        # for the allowance, which refills gradually rather than resetting.
         out(
             f"STOPPED: daily limit reached ({outcome.quota_stopped}). "
-            f"{outcome.n_skipped} example(s) were not run"
-            + (f"; the provider says retry in ~{wait / 3600:.1f} h" if wait else "")
-            + f". Re-run `ask-or-act run {config_path} --yes` after the reset: decisions "
-            "already made come from the cache, so nothing is repeated."
+            f"{outcome.n_skipped} example(s) were not run. There is no reset: the daily "
+            "allowance refills gradually (on Groq about 8,333 tokens an hour, all of it in "
+            "24 h), and the next scheduled run continues from here. To continue by hand "
+            f"later: `ask-or-act run {config_path} --yes`; decisions already made come from "
+            "the cache, so nothing is repeated."
         )
         return RunResult(EXIT_QUOTA, plan, outcome, run_dir)
     return RunResult(EXIT_OK, plan, outcome, run_dir)

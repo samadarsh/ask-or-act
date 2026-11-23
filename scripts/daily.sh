@@ -5,8 +5,8 @@
 #   scripts/daily.sh configs/pilot/schedule.toml  # the day-1 pilot
 #
 # Shows the plan first (no calls), asks for confirmation, then runs one queue per model
-# in parallel. Each model stops cleanly at its daily limit; re-run after the reset to
-# continue from the cache. Keys come from .env and are never printed.
+# in parallel. Each model stops cleanly at its daily limit; its allowance refills
+# gradually (no reset), and a later run continues from the cache. Keys come from .env and are never printed.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

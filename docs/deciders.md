@@ -102,8 +102,11 @@ What the code does with these limits:
 - **Per-day 429** (body names "per day", RPD or TPD): the run **stops cleanly**.
   - Exit code 5; the run is saved with `status = "quota_stopped"`.
   - The message says how many examples were skipped.
-  - Re-running the same config after the reset makes only the missing calls. Finished
+  - Re-running the same config later makes only the missing calls. Finished
     decisions and individual samples are in the cache.
+  - There is no daily reset. Groq's allowance refills gradually: every "try again in"
+    time in the 2026-11-23 logs equals the missing tokens ÷ (200,000 / 24 h), i.e.
+    about 8,333 tokens an hour. A shorter gap between runs just means a smaller run.
 - **Quota warning in the plan:** set `[execution] requests_per_day` / `tokens_per_day`,
   and the plan shows what share of the daily quota a run needs.
 - **Not checked yet:** the docs don't specify the 429 body. The tests use Groq's observed

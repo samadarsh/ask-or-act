@@ -65,6 +65,17 @@ def test_the_quick_check_says_partial_and_scores_decided_only(
     assert f"not analysed): {expected:.3f}" in text  # out of 2, not out of 6
 
 
+def test_the_stop_message_says_the_allowance_refills_gradually(
+    two_days: tuple[Path, Path, list[str]],
+) -> None:
+    text = "\n".join(two_days[2])
+    assert "There is no reset: the daily allowance refills gradually" in text
+    assert "about 8,333 tokens an hour" in text
+    assert "the next scheduled run continues from here" in text
+    assert "after the reset" not in text
+    assert "retry in ~" not in text  # Groq's wait is for one request, not the allowance
+
+
 def test_both_run_converters_refuse_a_partial_run(
     two_days: tuple[Path, Path, list[str]],
 ) -> None:

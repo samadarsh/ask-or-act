@@ -175,6 +175,15 @@ scripts/study-job.sh install   # (re)write the plist and load the job
 Between steps 2 and 3, every run refuses with "not at the pin". So a new tag can't be
 picked up silently, and a forgotten move can't run old code unnoticed.
 
+**Pin history.** Pins live on the `study` branch, which starts at `study-v1`, so a
+pin carries only what the study job needs, not later analysis work on `main`.
+- `study-v1` (9a593e6, 2026-11-22 UTC): the scheduled job.
+- `study-v2` (52f5c76, 2026-11-23 UTC): study-v1 plus the job-script fix only. In the
+  worktree `logs/` is a symlink, and BSD `find` doesn't follow a linked start folder,
+  so `due` saw no runs and the job would have run hourly (`find -H`). `install` now
+  works from the main folder. No change to configs, prompts, decider resolution,
+  cache keys or example selection.
+
 ## Approved schedule (2026-11-21 UTC; measured tokens, 90% of each model's limits)
 
 Day 1 was the pilot. Each day: run `scripts/daily.sh` once after the quota resets.
