@@ -1,0 +1,55 @@
+# Runs this repository's own Action (action.yml, `uses: ./`) on the committed
+# fixtures (tests/fixtures/gate/), so a change that breaks the Action fails here.
+# No model calls: the fixtures are synthetic predictions files.
+name: Gate action
+
+on:
+  push:
+    branches: [main]
+  pull_request: # never pull_request_target
+
+permissions:
+  contents: read
+  pull-requests: write # the demo comment on same-repo PRs
+
+jobs:
+  action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Gate a same-model rerun (should pass, and comment on the PR)
+        id: pass
+        uses: ./
+        with:
+          new: tests/fixtures/gate/candidate.csv
+          baseline: tests/fixtures/gate/base.csv
+          change: "fixture: another run of the same model"
+          expect: accuracy -3 to +3 points
+          args: --no-config
+          artifact-name: gate-candidate
+
+      - name: Gate a regressed file (should fail)
+        id: fail
+        continue-on-error: true
+        uses: ./
+        with:
+          new: tests/fixtures/gate/regressed.csv
+          baseline: tests/fixtures/gate/base.csv
+          args: --no-config
+          comment: "false"
+          artifact-name: gate-regressed
+
+      - name: Check the outcomes
+        env:
+          PASS_RESULT: ${{ steps.pass.outputs.result }}
+          FAIL_RESULT: ${{ steps.fail.outputs.result }}
+          FAIL_CODE: ${{ steps.fail.outputs.exit-code }}
+          FAIL_JSON: ${{ steps.fail.outputs.json }}
+        run: |
+          test "$PASS_RESULT" = pass
+          test "$FAIL_RESULT" = fail
+          test "$FAIL_CODE" = 1
+          # the JSON carries the changelog entry for `ask-or-act changelog add`
+          jq -e '.result.passed == false and (.result.changelog_entry.id | length) > 0' "$FAIL_JSON"
+          echo "pass -> pass, regressed -> fail (exit 1): OK"

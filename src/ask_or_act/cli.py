@@ -476,6 +476,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     gate.add_argument("new", type=Path, metavar="NEW", help="the new predictions file")
     gate.add_argument("--baseline", type=Path, help="the baseline file (default: [gate] baseline)")
+    gate.add_argument(
+        "-o",
+        "--markdown",
+        type=Path,
+        metavar="FILE",
+        help="also write the result as Markdown (a PR comment or job summary), pass or fail",
+    )
     pol = gate.add_argument_group("policy (flags > ask-or-act.toml [gate] > defaults)")
     pol.add_argument(
         "--policy", type=Path, help="config file (default: the nearest ask-or-act.toml)"
@@ -1359,6 +1366,17 @@ def _run_gate(args: argparse.Namespace) -> int:
         print(summaries.wrap(f"{result.header()}\n{result.summary()}"))
     if not args.no_record and not args.quiet:
         out.say(f"changelog: appended {entry['id']} to {log_path}")
+    if args.markdown is not None:
+        from ask_or_act import gate_markdown
+
+        md = gate_markdown.render(result, entry, recorded=None if args.no_record else str(log_path))
+        try:
+            args.markdown.parent.mkdir(parents=True, exist_ok=True)
+            args.markdown.write_text(md, encoding="utf-8")
+        except OSError as exc:
+            print(out.err.error(f"can't write {args.markdown}: {exc}"), file=sys.stderr)
+            return exit_codes.USAGE
+        out.say(f"saved: {args.markdown}")
     return exit_codes.OK if result.passed else exit_codes.NO
 
 

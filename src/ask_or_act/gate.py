@@ -679,6 +679,7 @@ def _text(c: Check, status: Status, p_holm: float, p: Policy) -> str:
         values = f"ECE {c.new:.3f} vs {c.baseline:.3f} accuracy-controlled"
         change = f"{c.diff:+.3f} [{c.low:+.3f}, {c.high:+.3f}]"
         tol = f"{c.tolerance:g}"
+        plain = tol
         worst = f"{c.high:+.3f}"
     else:
         digits = 1 if c.name == "accuracy" else 0
@@ -687,13 +688,14 @@ def _text(c: Check, status: Status, p_holm: float, p: Policy) -> str:
             values += f" at α = {p.alpha:g}"
         change = f"{c.diff * 100:+.1f} points [{c.low * 100:+.1f}, {c.high * 100:+.1f}]"
         tol = f"{c.tolerance * 100:g}-point"
+        plain = f"{c.tolerance * 100:g} point{'' if c.tolerance * 100 == 1 else 's'}"
         worst = f"{-c.low * 100:.1f} points"
     head = f"{values}: {change}"
     if status == "fail":
         return f"{head}, worse beyond the {tol} tolerance (Holm p = {p_holm:.2g})"
     if status == "pass":
         return f"{head}, within the {tol} tolerance"
-    return f"{head}, inconclusive: could be up to {worst} worse (tolerance {tol})"
+    return f"{head}, inconclusive: could be up to {worst} worse (tolerance {plain})"
 
 
 def _certified(new: Thresholds, base: Thresholds, p: Policy) -> Check:

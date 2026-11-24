@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from ask_or_act import changelog
+from ask_or_act import changelog, gate_markdown
 from ask_or_act.cli import main
 
 N_BOOT = ["--n-boot", "200"]
@@ -418,3 +418,51 @@ def test_entries_hold_no_input_rows(repo: Path) -> None:
     text = Path("ask-or-act-changelog.jsonl").read_text()
     assert "t00000" not in text  # no row ids either: the log is per run, not per row
     assert all(not isinstance(v, float) or math.isfinite(v) for v in json.loads(text).values())
+
+
+# --------------------------------------------------------------------------- -o markdown
+
+
+def test_markdown_is_written_pass_or_fail(repo: Path) -> None:
+    assert gate("same.csv", "--baseline", "base.csv", "-o", "out/pass.md") == 0
+    md = (repo / "out" / "pass.md").read_text()
+    assert md.startswith(gate_markdown.MARKER + "\n## ✅ ask-or-act gate: PASS")
+    assert "| ✅ | accuracy |" in md
+    assert "Changelog: appended `" in md  # recorded locally
+    args = ("worse.csv", "--baseline", "base.csv", "--no-record", "-o", "fail.md")
+    assert gate(*args, "--expect", "accuracy +0 to +2 points") == 1
+    md = (repo / "fail.md").read_text()
+    assert "## ❌ ask-or-act gate: FAIL" in md
+    assert "| ❌ | accuracy |" in md
+    assert "missed (observed" in md
+    assert "ask-or-act changelog add gate.json" in md  # not recorded: how to keep it
+
+
+def test_markdown_escapes_free_text(repo: Path) -> None:
+    change = "<img src=x onerror=alert(1)> | `rm -rf`\nsecond line"
+    gate("same.csv", "--baseline", "base.csv", "--change", change, "-o", "g.md")
+    md = (repo / "g.md").read_text()
+    assert "<img" not in md
+    assert "&lt;img src=x onerror=alert(1)&gt; \\| 'rm -rf' second line" in md
+
+
+def test_markdown_holds_no_input_rows(repo: Path) -> None:
+    gate("worse.csv", "--baseline", "base.csv", "--fail-on-inconclusive", "-o", "g.md")
+    md = (repo / "g.md").read_text()
+    assert "t00001" not in md  # ids
+    assert "strict: test rows needed" in md
+
+
+def test_gate_fixtures_match_their_script(tmp_path: Path) -> None:
+    from tests.fixtures.gate import make_fixtures
+
+    make_fixtures.main(tmp_path)
+    for name in make_fixtures.FILES:
+        assert (tmp_path / name).read_bytes() == (make_fixtures.HERE / name).read_bytes(), name
+
+
+def test_inconclusive_tolerance_wording(unsure: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    gate("redraw.csv", "--baseline", "base.csv", "--tolerance", "accuracy=0.01,coverage=0.05")
+    out = words(capsys.readouterr().out)
+    assert "-point)" not in out
+    assert re.search(r"\(tolerance (1 point|5 points|0\.02)\)", out) or "inconclusive" not in out
