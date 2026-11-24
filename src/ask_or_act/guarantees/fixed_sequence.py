@@ -236,3 +236,69 @@ def multi_start(
         for s in starts
     )
     return MultiStartResult(alpha, delta, scans, tuple(starts))
+
+
+def max_errors(n_max: int, alpha: float, level: float) -> list[int]:
+    """``k[n]``: the most errors among n emitted examples that still pass the test
+    P(Bin(n, α) ≤ k) ≤ level (ToE Eq. (4), p-value form; binomial.py), or −1 when none
+    does. Index 0 is −1: an empty emit set never passes.
+
+    The p-value increases in k, so "passes" is exactly k ≤ k[n]; and it decreases in n
+    at fixed k, so k[n] never goes down, which lets the table be filled in one pass."""
+    out = [-1] * (n_max + 1)
+    k = -1
+    for n in range(1, n_max + 1):
+        while k + 1 < n and p_value(k + 1, n, alpha) <= level:
+            k += 1
+        out[n] = k
+    return out
+
+
+class FastFit:
+    """``multi_start(...).threshold`` for many resamples of one calibration set: the
+    same tests, vectorised over the grid. Used by the gate's bootstrap, which refits a
+    threshold on every resample (gate.py).
+
+    Why it is the same: at one level δ/S every grid point's test depends only on its
+    emit counts (n, errors), so a point passes or fails the same way in every scan, and
+    duplicates of a tested emit set inherit its result, as in ``fixed_sequence``. A
+    scan from start s certifies the run of consecutive passing points that begins at
+    the first grid point ≤ s, stopping before the first failure; λ̂ is the smallest
+    threshold any scan certified. tests/test_gate_stats.py checks equality with
+    ``multi_start`` on random data and every grid kind."""
+
+    def __init__(
+        self, *, alpha: float, delta: float, grid: Sequence[float], starts: Sequence[float], n: int
+    ) -> None:
+        if not starts or len(set(starts)) != len(starts):
+            raise ValueError("need distinct starts")
+        self.grid = np.asarray(grid, dtype=np.float64)
+        if np.any(np.diff(self.grid) >= 0):
+            raise ValueError("grid must be strictly decreasing (scan order)")
+        self.alpha, self.level = alpha, delta / len(starts)
+        self.kmax = np.asarray(max_errors(n, alpha, self.level), dtype=np.int64)
+        self.first = [int(np.searchsorted(-self.grid, -(s + _EPS), side="left")) for s in starts]
+
+    def threshold(self, confidence: FloatArray, correct: BoolArray) -> float | None:
+        order = np.argsort(confidence, kind="stable")
+        conf = confidence[order]
+        wrong = ~correct[order]
+        n_all = len(conf)
+        if n_all >= len(self.kmax):  # a resample of whole groups can be longer than n
+            self.kmax = np.asarray(max_errors(2 * n_all, self.alpha, self.level), dtype=np.int64)
+        # emitted = confidence ≥ λ − ε: everything from the first such position on
+        pos = np.searchsorted(conf, self.grid - _EPS, side="left")
+        n = n_all - pos
+        suffix = np.concatenate([np.cumsum(wrong[::-1])[::-1], [0]])
+        errors = suffix[pos]
+        passed = (n > 0) & (errors <= self.kmax[n])
+        fails = np.flatnonzero(~passed)
+        best: float | None = None
+        for j0 in self.first:
+            if j0 >= len(self.grid) or not passed[j0]:
+                continue
+            k = int(np.searchsorted(fails, j0))
+            end = int(fails[k]) if k < len(fails) else len(self.grid)
+            lam = float(self.grid[end - 1])
+            best = lam if best is None else min(best, lam)
+        return best

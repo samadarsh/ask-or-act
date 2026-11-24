@@ -22,7 +22,8 @@ DEFAULT_SAMPLES_DIR = Path("data/samples")
 
 
 LOCAL_ONLY = (
-    "The analysis commands (check, thresholds, metrics, compare, report, demo) run locally: "
+    "The analysis commands (check, thresholds, metrics, compare, report, gate, changelog, demo) "
+    "run locally: "
     "no network connections, no telemetry."
 )
 DOCS = "https://github.com/samadarsh/ask-or-act/blob/main/docs/cli-design.md"
@@ -176,6 +177,43 @@ examples:
 
 exit codes: 0 saved, 2 usage, 6 bad input (e.g. the files cover different ids).
 runs locally: no network connections, no telemetry; the page loads nothing external.
+docs: {DOCS}
+"""
+
+GATE_EPILOG = f"""\
+examples:
+  # fail only if new.csv is worse than the baseline beyond noise
+  ask-or-act gate new.csv --baseline baselines/main.csv
+
+  # record what you changed and what you expect, before seeing the result
+  ask-or-act gate new.csv --baseline baselines/main.csv --change "prompt v4" \\
+      --why "shorter instructions" --expect "accuracy -1 to +1 points"
+
+  # the policy in ask-or-act.toml ([gate] table): baseline, alpha, tolerances, ...
+  ask-or-act gate new.csv
+
+checks (paired on the same ids): accuracy (Tango score test), calibration (ACE gap,
+accuracy-controlled), coverage at alpha (thresholds refitted per resample), certified.
+A check fails only when the new file is worse by more than its tolerance beyond noise
+(one-sided tests at --level, Holm-adjusted); "inconclusive" passes unless
+--fail-on-inconclusive. Every run appends an entry to the decision changelog.
+
+exit codes: 0 pass, 1 fail, 2 usage or config error, 6 bad input (e.g. different ids),
+7 too few labelled rows.
+runs locally: no network connections, no telemetry.
+docs: {DOCS}
+"""
+
+CHANGELOG_EPILOG = f"""\
+examples:
+  ask-or-act changelog --last 5
+  # write the expected effect before generating the new predictions
+  ask-or-act changelog expect --change "prompt v4" --why "cut latency" \\
+      --expect "accuracy -1 to +1 points" --expect "coverage >= 0 points"
+  # append the entry a CI gate run produced (its --json output)
+  ask-or-act changelog add gate.json
+
+exit codes: 0 done, 2 usage, 6 unreadable changelog or file.
 docs: {DOCS}
 """
 
@@ -424,6 +462,102 @@ def build_parser() -> argparse.ArgumentParser:
     cmp.add_argument("--n-boot", type=int, default=2000, help="bootstrap resamples (2000)")
     cmp.add_argument("--seed", type=int, default=0, help="bootstrap seed (0)")
     cmp.add_argument("--bins", type=int, default=15, help="calibration bins (15)")
+
+    gate = sub.add_parser(
+        "gate",
+        help="pass/fail a new predictions file against a baseline, for CI (local, no network)",
+        description="Compare a new predictions file with a saved baseline on the same ids and "
+        "exit 1 only if it is worse beyond noise and beyond a tolerance: accuracy, "
+        "accuracy-controlled calibration, coverage at alpha, and certification. Appends an "
+        "entry to the decision changelog.",
+        epilog=GATE_EPILOG,
+        parents=[_input_flags(), _output_flags()],
+        **opts,
+    )
+    gate.add_argument("new", type=Path, metavar="NEW", help="the new predictions file")
+    gate.add_argument("--baseline", type=Path, help="the baseline file (default: [gate] baseline)")
+    pol = gate.add_argument_group("policy (flags > ask-or-act.toml [gate] > defaults)")
+    pol.add_argument(
+        "--policy", type=Path, help="config file (default: the nearest ask-or-act.toml)"
+    )
+    pol.add_argument("--no-config", action="store_true", help="ignore any config file")
+    pol.add_argument("--alpha", type=_unit_interval, help="target risk (default 0.1)")
+    pol.add_argument("--delta", type=_unit_interval, help="failure probability (default 0.1)")
+    pol.add_argument(
+        "--tolerance",
+        type=_columns,
+        metavar="NAME=VALUE,...",
+        help="how much worse is allowed: accuracy=0.01 (1 point), calibration=0.02, "
+        "coverage=0.05 (the defaults)",
+    )
+    pol.add_argument(
+        "--level", type=_unit_interval, help="one-sided test level, Holm-adjusted (default 0.05)"
+    )
+    pol.add_argument(
+        "--fail-on-inconclusive",
+        action="store_true",
+        default=None,
+        help="strict mode: a check that is neither shown worse nor shown within its "
+        "tolerance fails",
+    )
+    pol.add_argument("--n-boot", type=int, help="bootstrap resamples (2000)")
+    pol.add_argument("--seed", type=int, help="bootstrap seed (0)")
+    pol.add_argument("--bins", type=int, help="calibration bins (15)")
+    log = gate.add_argument_group("decision changelog")
+    log.add_argument("--change", default="", help="what changed")
+    log.add_argument("--why", default="", help="why")
+    log.add_argument(
+        "--expect",
+        action="append",
+        default=[],
+        metavar="TEXT",
+        help="the expected effect, before the run (repeatable): e.g. 'accuracy +0 to +2 points'",
+    )
+    log.add_argument("--model", help="context: model name")
+    log.add_argument("--prompt", help="context: prompt version")
+    log.add_argument("--dataset", help="context: dataset")
+    log.add_argument(
+        "--changelog",
+        type=Path,
+        help="the changelog file (default: [gate] changelog or ask-or-act-changelog.jsonl)",
+    )
+    log.add_argument(
+        "--no-record",
+        action="store_true",
+        help="don't append (CI: the entry is in the --json output; append it locally with "
+        "ask-or-act changelog add)",
+    )
+
+    chl = sub.add_parser(
+        "changelog",
+        help="the decision changelog: predicted vs observed for each gate run",
+        description="Show the decision changelog, record an expected effect before a run, or "
+        "append an entry from a CI gate run.",
+        epilog=CHANGELOG_EPILOG,
+        **opts,
+    )
+    chl.add_argument(
+        "--file",
+        type=Path,
+        help="the changelog (default: [gate] changelog or ask-or-act-changelog.jsonl)",
+    )
+    chl.add_argument("--no-config", action="store_true", help="ignore any config file")
+    chl.add_argument("--last", type=int, metavar="N", help="only the last N entries")
+    chl.add_argument("--json", action="store_true", help="print one JSON document on stdout")
+    chl_sub = chl.add_subparsers(dest="changelog_command")
+    exp = chl_sub.add_parser("expect", help="record the expected effect before the run", **opts)
+    exp.add_argument("--change", required=True, help="what will change")
+    exp.add_argument("--why", default="", help="why")
+    exp.add_argument(
+        "--expect",
+        action="append",
+        required=True,
+        metavar="TEXT",
+        help="the expected effect (repeatable)",
+    )
+    exp.add_argument("--file", type=Path, dest="sub_file", help=argparse.SUPPRESS)
+    add = chl_sub.add_parser("add", help="append the entry from a gate --json output", **opts)
+    add.add_argument("gate_json", type=Path, metavar="GATE_JSON", help="gate --json output file")
 
     dem = sub.add_parser(
         "demo",
@@ -1031,6 +1165,273 @@ def _run_demo(args: argparse.Namespace) -> int:
     return exit_codes.OK
 
 
+def _config(args: argparse.Namespace, out: _Out) -> Any:
+    """The project config, or None; raises ConfigError. Using it is never silent."""
+    from ask_or_act import project_config
+
+    if args.no_config:
+        return None
+    policy = getattr(args, "policy", None)
+    cfg = project_config.load(policy) if policy else project_config.find()
+    if cfg is not None and not getattr(args, "quiet", False):
+        try:
+            shown = cfg.path.relative_to(Path.cwd().resolve())
+        except ValueError:
+            shown = cfg.path
+        out.say(f"config: {shown}")
+    return cfg
+
+
+GATE_KEYS: dict[str, type | tuple[type, ...]] = {
+    "baseline": str,
+    "alpha": (float, int),
+    "delta": (float, int),
+    "tolerance": dict,
+    "level": (float, int),
+    "require_certified": bool,
+    "strict": bool,
+    "require_expectation": bool,
+    "changelog": str,
+    "registered": str,
+    "n_boot": int,
+    "seed": int,
+    "bins": int,
+}
+
+
+def _gate_policy(args: argparse.Namespace, cfg: Any) -> tuple[Any, Path | None, Path]:
+    """(Policy, baseline path, changelog path): flags > [gate] > defaults."""
+    from ask_or_act import api, changelog, gate, project_config
+
+    table: dict[str, Any] = cfg.table("gate") if cfg is not None else {}
+    where = f"{cfg.path} [gate]" if cfg is not None else "[gate]"
+    project_config.check_keys(where, table, GATE_KEYS)
+    tol_table = dict(table.get("tolerance", {}))
+    tol_flags = getattr(args, "tolerance", None) or {}
+    tol: dict[str, float] = {}
+    for src, values in (("config", tol_table), ("--tolerance", tol_flags)):
+        for k, v in values.items():
+            if k not in ("accuracy", "calibration", "coverage"):
+                raise project_config.ConfigError(
+                    f"{src}: unknown tolerance {k!r} (accuracy, calibration, coverage)"
+                )
+            try:
+                tol[k] = float(v)
+            except (TypeError, ValueError):
+                raise project_config.ConfigError(f"{src}: tolerance {k} must be a number") from None
+
+    def pick(flag: Any, key: str, default: Any) -> Any:
+        return flag if flag is not None else table.get(key, default)
+
+    try:
+        policy = gate.Policy(
+            alpha=float(pick(args.alpha, "alpha", api.DEFAULT_ALPHA)),
+            delta=float(pick(args.delta, "delta", api.DEFAULT_DELTA)),
+            tolerance=gate.Tolerances(**tol),
+            level=float(pick(args.level, "level", 0.05)),
+            require_certified=bool(table.get("require_certified", True)),
+            strict=bool(pick(args.fail_on_inconclusive, "strict", False)),
+            require_expectation=bool(table.get("require_expectation", False)),
+            n_boot=int(pick(args.n_boot, "n_boot", 2000)),
+            seed=int(pick(args.seed, "seed", 0)),
+            bins=int(pick(args.bins, "bins", 15)),
+            registered=table.get("registered"),
+        )
+    except ValueError as exc:
+        raise project_config.ConfigError(f"{where}: {exc}") from exc
+    for key in ("alpha", "delta"):
+        if not 0.0 < getattr(policy, key) < 1.0:
+            raise project_config.ConfigError(f"{where}: {key} must be between 0 and 1")
+    folder = cfg.folder if cfg is not None else Path()
+
+    def rel(p: str) -> Path:
+        """Relative to the config's folder, shown (and logged) relative to the cwd."""
+        path = Path(p)
+        if path.is_absolute():
+            return path
+        full = (folder / path).resolve()
+        try:
+            return full.relative_to(Path.cwd().resolve())
+        except ValueError:
+            return full
+
+    baseline = args.baseline or (rel(table["baseline"]) if "baseline" in table else None)
+    log = args.changelog or (
+        rel(table["changelog"]) if "changelog" in table else changelog.DEFAULT_PATH
+    )
+    return policy, baseline, log
+
+
+def _run_gate(args: argparse.Namespace) -> int:
+    from ask_or_act import api, changelog, exit_codes, gate, predictions, project_config, summaries
+
+    out = _Out(args)
+    try:
+        cfg = _config(args, out)
+        policy, baseline, log_path = _gate_policy(args, cfg)
+    except project_config.ConfigError as exc:
+        print(out.err.error(str(exc)), file=sys.stderr)
+        return exit_codes.USAGE
+    if baseline is None:
+        print(
+            out.err.error("no baseline: give --baseline FILE, or set baseline in [gate]"),
+            file=sys.stderr,
+        )
+        return exit_codes.USAGE
+    try:
+        expectations = [gate.Expectation.parse(t) for t in args.expect]
+    except ValueError as exc:
+        print(out.err.error(str(exc)), file=sys.stderr)
+        return exit_codes.USAGE
+    try:
+        entries = changelog.read(log_path)
+    except changelog.ChangelogError as exc:
+        print(out.err.error(str(exc)), file=sys.stderr)
+        return exit_codes.BAD_INPUT
+    pending = changelog.open_expectation(entries)
+    if pending is not None:
+        if expectations:
+            print(
+                out.err.error(
+                    f"{log_path} already holds an expectation for this run ({pending['id']}: "
+                    f"{pending.get('change', '')}); drop --expect, so the one written before "
+                    "the run counts"
+                ),
+                file=sys.stderr,
+            )
+            return exit_codes.USAGE
+        expectations = [gate.Expectation.from_json(d) for d in pending.get("expected", [])]
+        out.say(
+            f"expectation: {pending['id']} ({pending.get('change', '')}), recorded "
+            f"{pending['time']}"
+        )
+    tables = _load_tables([args.new, baseline], args, out)
+    if isinstance(tables, int):
+        return tables
+    try:
+        result = gate.run_gate(tables[0], tables[1], policy=policy, expectations=expectations)
+    except api.NotEnoughData as exc:
+        _not_enough(out, exc, policy.alpha, policy.delta)
+        return exit_codes.NOT_ENOUGH_DATA
+    except predictions.InputError as exc:
+        for p in exc.problems:
+            out.problem(p)
+        return exit_codes.BAD_INPUT
+    t = tables[0]
+    context = {
+        "model": args.model or (t.model if t.model != "?" else None),
+        "prompt": args.prompt,
+        "dataset": args.dataset or t.dataset,
+    }
+    entry = changelog.gate_entry(
+        result,
+        entries=entries,
+        new_path=None if str(args.new) == "-" else args.new,
+        baseline_path=baseline,
+        change=args.change,
+        why=args.why,
+        context=context,
+        expectation=pending,
+    )
+    if not args.no_record:
+        changelog.append(log_path, entry)
+    if not args.quiet:
+        for w in result.warnings:
+            out.say(out.err.warning(w))
+        if entry["rerun_of"]:
+            out.say(
+                out.err.warning(
+                    f"these files were gated before ({entry['rerun_of']}); that run's "
+                    "expectation is the one that counts"
+                )
+            )
+    if args.json:
+        res = result.to_json()
+        res["changelog_entry"] = entry
+        inputs: dict[str, Any] = {
+            "new": str(args.new),
+            "baseline": str(baseline),
+            "config": str(cfg.path) if cfg is not None else None,
+        }
+        doc = summaries.envelope("gate", res, [], inputs)
+        print(json.dumps(summaries.to_jsonable(doc), indent=2, ensure_ascii=False))
+    else:
+        print(summaries.wrap(f"{result.header()}\n{result.summary()}"))
+    if not args.no_record and not args.quiet:
+        out.say(f"changelog: appended {entry['id']} to {log_path}")
+    return exit_codes.OK if result.passed else exit_codes.NO
+
+
+def _run_changelog(args: argparse.Namespace) -> int:
+    from ask_or_act import changelog, exit_codes, gate, project_config, summaries
+
+    out = _Out(argparse.Namespace(quiet=args.json, color="auto"))
+    try:
+        cfg = _config(argparse.Namespace(no_config=args.no_config, quiet=args.json), out)
+        table: dict[str, Any] = cfg.table("gate") if cfg is not None else {}
+    except project_config.ConfigError as exc:
+        print(out.err.error(str(exc)), file=sys.stderr)
+        return exit_codes.USAGE
+    chosen = getattr(args, "sub_file", None) or args.file
+    if chosen is None and "changelog" in table:
+        p = Path(str(table["changelog"]))
+        chosen = p if p.is_absolute() else cfg.folder / p
+    path = chosen or changelog.DEFAULT_PATH
+    try:
+        entries = changelog.read(path)
+    except changelog.ChangelogError as exc:
+        print(out.err.error(str(exc)), file=sys.stderr)
+        return exit_codes.BAD_INPUT
+    if args.changelog_command == "expect":
+        try:
+            exps = [gate.Expectation.parse(t) for t in args.expect]
+        except ValueError as exc:
+            print(out.err.error(str(exc)), file=sys.stderr)
+            return exit_codes.USAGE
+        pending = changelog.open_expectation(entries)
+        if pending is not None:
+            print(
+                out.err.error(
+                    f"{path} already has an open expectation ({pending['id']}); run the gate "
+                    "first, so each run has one prediction"
+                ),
+                file=sys.stderr,
+            )
+            return exit_codes.USAGE
+        entry = changelog.expectation_entry(change=args.change, why=args.why, expectations=exps)
+        changelog.append(path, entry)
+        print(f"recorded {entry['id']} in {path}: the next gate run checks it")
+        return exit_codes.OK
+    if args.changelog_command == "add":
+        try:
+            doc = json.loads(args.gate_json.read_text(encoding="utf-8"))
+            entry = doc["result"]["changelog_entry"]
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            print(
+                out.err.error(f"{args.gate_json}: not a gate --json output ({exc})"),
+                file=sys.stderr,
+            )
+            return exit_codes.BAD_INPUT
+        if any(e["id"] == entry.get("id") for e in entries):
+            print(f"{entry.get('id')} is already in {path}; nothing appended")
+            return exit_codes.OK
+        try:
+            changelog.append(path, entry)
+        except changelog.ChangelogError as exc:
+            print(out.err.error(f"{args.gate_json}: {exc}"), file=sys.stderr)
+            return exit_codes.BAD_INPUT
+        print(f"appended {entry['id']} to {path}")
+        return exit_codes.OK
+    if args.json:
+        shown = entries[-args.last :] if args.last else entries
+        result: Any = {"entries": list(shown)}
+        doc = summaries.envelope("changelog", result, [], {"file": str(path)})
+        print(json.dumps(doc, indent=2, ensure_ascii=False))
+    else:
+        print(summaries.wrap(changelog.render(entries, args.last)))
+    return exit_codes.OK
+
+
 def _guarded(run: Callable[[argparse.Namespace], int], args: argparse.Namespace) -> int:
     """New commands: Ctrl-C exits 130 at once; a crash exits 70 with a report link,
     never 1, so CI can't mistake a bug for a failed gate."""
@@ -1105,6 +1506,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if _is_predictions(args.runs):
             return _guarded(_run_report_files, args)
         return _run_report(args)
+    if args.command == "gate":
+        return _guarded(_run_gate, args)
+    if args.command == "changelog":
+        return _guarded(_run_changelog, args)
     if args.command == "demo":
         return _guarded(_run_demo, args)
     if args.command == "judge":

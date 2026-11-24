@@ -39,6 +39,20 @@ COMMANDS: list[list[str]] = [
         "50",
     ],
     ["demo", "--dir", "{tmp}/demo"],
+    [
+        "gate",
+        str(FIXTURES / "support-bot.csv"),
+        "--baseline",
+        str(FIXTURES / "support-bot-large.csv"),
+        "--no-config",
+        "--changelog",
+        "{tmp}/log.jsonl",
+        "--n-boot",
+        "200",
+        "--expect",
+        "accuracy -1 to +1 points",
+    ],
+    ["changelog", "--no-config", "--file", "{tmp}/log.jsonl"],
     ["check", str(FIXTURES / "scores.csv"), "--json"],
     [
         "check",
@@ -82,4 +96,5 @@ def test_analysis_commands_make_no_network_calls(
     code = main([a.replace("{tmp}", str(tmp_path)) for a in argv])
     capsys.readouterr()
     assert no_network == []
-    assert code in (0, 6, 7)  # ran to completion: never a crash (70) from a blocked socket
+    # ran to completion (gate may say "no", exit 1): never a crash (70) from a blocked socket
+    assert code in (0, 1, 6, 7)
