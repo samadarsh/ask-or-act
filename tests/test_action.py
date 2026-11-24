@@ -14,6 +14,7 @@ ROOT = Path(__file__).parent.parent
 FILES = [
     ROOT / "action.yml",
     ROOT / ".github" / "workflows" / "gate.yml",
+    ROOT / ".github" / "workflows" / "ci.yml",
     ROOT / "examples" / "github" / "gate.yml",
 ]
 
