@@ -45,7 +45,45 @@ def min_rows(alpha: float, delta: float, *, starts: int = 1, error_rate: float =
         return n
     if error_rate >= alpha:
         return None
+    return _scan(alpha, level, error_rate)
+
+
+def _scan(alpha: float, level: float, rate: float) -> int | None:
+    """The first n ≤ MAX_ROWS with p_value(⌊rate·n⌋, n, α) ≤ level.
+
+    Recomputing that p-value for every n costs O(n) each, so a rate close to α (tens of
+    thousands of rows) took minutes. Instead F = P(Bin(n, α) ≤ k) is carried along
+    with the standard recurrences, O(1) per step:
+
+        F_{n+1}(k)     = F_n(k) − α·f_n(k)        (one more trial, same k)
+        F_{n+1}(k + 1) = F_{n+1}(k) + f_{n+1}(k + 1)
+
+    with f the binomial pmf, from lgamma. The carried value is accurate to far better
+    than the 1e-6 relative margin used here, and every candidate it flags is confirmed
+    with the exact ``p_value``. So the answer is exactly the old linear scan's, which
+    tests/test_sample_size.py checks."""
+    log_a, log_q = math.log(alpha), math.log1p(-alpha)
+
+    def pmf(k: int, n: int) -> float:
+        if k < 0 or k > n:
+            return 0.0
+        return math.exp(
+            math.lgamma(n + 1)
+            - math.lgamma(k + 1)
+            - math.lgamma(n - k + 1)
+            + k * log_a
+            + (n - k) * log_q
+        )
+
+    k = math.floor(rate)  # n = 1
+    cdf = p_value(k, 1, alpha)
     for n in range(1, MAX_ROWS + 1):
-        if p_value(math.floor(error_rate * n), n, alpha) <= level:
+        if cdf <= level * (1 + 1e-6) and p_value(k, n, alpha) <= level:
             return n
+        nk = math.floor(rate * (n + 1))
+        cdf = cdf - alpha * pmf(k, n)  # n + 1 trials, still ≤ k errors
+        while k < nk:  # ⌊rate·n⌋ rises by at most one per step, but be general
+            k += 1
+            cdf += pmf(k, n + 1)
+        cdf = min(1.0, max(0.0, cdf))
     return None
