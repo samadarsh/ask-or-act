@@ -693,7 +693,7 @@ def _text(c: Check, status: Status, p_holm: float, p: Policy) -> str:
         return f"{head}, worse beyond the {tol} tolerance (Holm p = {p_holm:.2g})"
     if status == "pass":
         return f"{head}, within the {tol} tolerance"
-    return f"{head}, inconclusive: could be up to {worst} worse (tolerance {tol})"
+    return f"{head}, inconclusive: could be up to {worst} worse (tolerance {tol.replace('-', ' ')})"
 
 
 def _certified(new: Thresholds, base: Thresholds, p: Policy) -> Check:

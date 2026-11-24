@@ -1,0 +1,205 @@
+# ask-or-act gate as a GitHub composite Action (docs/gate.md, "In CI").
+#
+# Runs `ask-or-act gate` on a new predictions file against a baseline, writes the
+# result to the job summary, uploads the gate JSON + Markdown as an artifact, and
+# comments on the pull request (one comment, edited on every push). The job fails
+# when the gate fails (exit 1) or can't run (exit 2, 6, 7, 70).
+#
+# Security:
+# - Every input reaches the shell through `env:`, never `${{ }}` inside a script, so
+#   a PR title passed as `change` can't inject commands.
+# - Every third-party action is pinned to a full commit SHA.
+# - It needs `pull-requests: write` only to comment; never `contents: write`. The
+#   changelog entry isn't committed from CI: it's in the artifact, and
+#   `ask-or-act changelog add gate.json` appends it locally.
+# - Fork PRs get a read-only token, so the comment is skipped for them; the job
+#   summary and the artifact still show the result. Don't use `pull_request_target`
+#   to work around that: it would run the fork's code with a write token.
+# - The analysis reads local files only; no network after installing.
+name: ask-or-act gate
+description: Fail a PR only when its AI predictions are worse than the baseline beyond noise.
+author: samadarsh
+branding:
+  icon: check-circle
+  color: blue
+
+inputs:
+  new:
+    description: The new predictions file (CSV, TSV or JSONL), relative to working-directory.
+    required: true
+  baseline:
+    description: The baseline file. Default, `baseline` in `[gate]` of ask-or-act.toml.
+    required: false
+    default: ""
+  change:
+    description: What changed (the decision changelog). E.g. the PR title.
+    required: false
+    default: ""
+  why:
+    description: Why it changed.
+    required: false
+    default: ""
+  expect:
+    description: >-
+      The expected effect, one per line, e.g. "accuracy +0 to +2 points". Better: record
+      it before the run with `ask-or-act changelog expect` and commit the changelog.
+    required: false
+    default: ""
+  fail-on-inconclusive:
+    description: Strict mode. "true" fails checks that are neither shown worse nor within tolerance.
+    required: false
+    default: "false"
+  args:
+    description: Extra gate flags, split on spaces, e.g. "--alpha 0.05 --n-boot 4000".
+    required: false
+    default: ""
+  working-directory:
+    description: Where to run (the config file is searched from here up to the repo root).
+    required: false
+    default: "."
+  comment:
+    description: '"true" comments the result on the pull request (skipped on forks).'
+    required: false
+    default: "true"
+  artifact-name:
+    description: The name of the uploaded artifact (gate.json and gate.md).
+    required: false
+    default: ask-or-act-gate
+  python-version:
+    description: The Python used to run ask-or-act.
+    required: false
+    default: "3.12"
+  github-token:
+    description: Token for the PR comment.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  result:
+    description: pass, fail, or error (the gate couldn't run).
+    value: ${{ steps.gate.outputs.result }}
+  exit-code:
+    description: The gate's exit code (0 pass, 1 fail, 2 usage, 6 bad input, 7 too few rows).
+    value: ${{ steps.gate.outputs.exit-code }}
+  json:
+    description: Path of the gate --json output.
+    value: ${{ steps.gate.outputs.json }}
+  markdown:
+    description: Path of the Markdown summary.
+    value: ${{ steps.gate.outputs.markdown }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up uv
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        python-version: ${{ inputs.python-version }}
+        enable-cache: true
+        cache-dependency-glob: ${{ github.action_path }}/uv.lock
+
+    - name: Install ask-or-act (from this action's own checkout, locked)
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: uv sync --project "$ACTION_PATH" --locked --no-dev --quiet
+
+    - name: Run the gate
+      id: gate
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        NEW: ${{ inputs.new }}
+        BASELINE: ${{ inputs.baseline }}
+        CHANGE: ${{ inputs.change }}
+        WHY: ${{ inputs.why }}
+        EXPECT: ${{ inputs.expect }}
+        STRICT: ${{ inputs.fail-on-inconclusive }}
+        EXTRA: ${{ inputs.args }}
+      run: |
+        out="$RUNNER_TEMP/ask-or-act-gate"
+        mkdir -p "$out"
+        cmd=(gate "$NEW" --no-record --json -o "$out/gate.md" --color never)
+        [ -n "$BASELINE" ] && cmd+=(--baseline "$BASELINE")
+        [ -n "$CHANGE" ] && cmd+=(--change "$CHANGE")
+        [ -n "$WHY" ] && cmd+=(--why "$WHY")
+        [ "$STRICT" = "true" ] && cmd+=(--fail-on-inconclusive)
+        while IFS= read -r line; do
+          [ -n "$line" ] && cmd+=(--expect "$line")
+        done <<< "$EXPECT"
+        read -r -a extra <<< "$EXTRA"
+        cmd+=("${extra[@]}")
+
+        set +e
+        uv run --project "$ACTION_PATH" --no-sync ask-or-act "${cmd[@]}" > "$out/gate.json"
+        code=$?
+        set -e
+
+        case "$code" in
+          0) result=pass ;;
+          1) result=fail ;;
+          *) result=error ;;
+        esac
+        json="$out/gate.json"
+        if [ "$result" = error ]; then
+          rm -f "$json"
+          json=""
+          {
+            echo "<!-- ask-or-act-gate -->"
+            echo "## ⚠️ ask-or-act gate: could not run (exit $code)"
+            echo
+            echo "See the job log: 2 = usage or config, 6 = bad input or ids differ,"
+            echo "7 = too few rows, 70 = a bug in ask-or-act."
+          } > "$out/gate.md"
+        fi
+        {
+          echo "result=$result"
+          echo "exit-code=$code"
+          echo "json=$json"
+          echo "markdown=$out/gate.md"
+          echo "dir=$out"
+        } >> "$GITHUB_OUTPUT"
+        cat "$out/gate.md" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload the gate JSON and Markdown
+      if: always() && steps.gate.outputs.dir != ''
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ steps.gate.outputs.dir }}
+        if-no-files-found: warn
+
+    - name: Comment on the pull request
+      # Only same-repo PRs: a fork's token is read-only.
+      if: >-
+        always() && steps.gate.outputs.dir != '' && inputs.comment == 'true' &&
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+        PR: ${{ github.event.pull_request.number }}
+        BODY: ${{ steps.gate.outputs.markdown }}
+      run: |
+        # Edit this action's own comment (found by its marker), never another bot's.
+        id=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+          --jq '.[] | select(.body | startswith("<!-- ask-or-act-gate -->")) | .id' | tail -n 1)
+        if [ -n "$id" ]; then
+          gh api -X PATCH "repos/$REPO/issues/comments/$id" -F "body=@$BODY" > /dev/null
+          echo "updated comment $id"
+        else
+          gh api "repos/$REPO/issues/$PR/comments" -F "body=@$BODY" > /dev/null
+          echo "commented on #$PR"
+        fi
+
+    - name: Fail the job if the gate failed
+      if: steps.gate.outputs.result != 'pass'
+      shell: bash
+      env:
+        CODE: ${{ steps.gate.outputs.exit-code }}
+        RESULT: ${{ steps.gate.outputs.result }}
+      run: |
+        echo "::error title=ask-or-act gate::gate $RESULT (exit $CODE)"
+        exit "${CODE:-70}"

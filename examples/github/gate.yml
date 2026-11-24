@@ -1,0 +1,53 @@
+# Example: gate every pull request on your AI's predictions.
+# Copy to .github/workflows/gate.yml in your repository and adapt the "Predict" step.
+#
+# What it does: your PR's code produces predictions.csv on a fixed, labelled eval set;
+# ask-or-act compares it with the baseline committed on main, on the same ids. The job
+# fails only when the new predictions are worse beyond noise and beyond the tolerances
+# in ask-or-act.toml. The result is a PR comment (edited on every push), the job
+# summary, and an artifact holding gate.json.
+#
+# The decision changelog isn't committed from CI (this workflow never gets
+# contents: write). Record the expected effect before the run, commit it with the
+# PR, and after the run append the entry locally:
+#
+#   ask-or-act changelog expect --change "prompt v4" --expect "accuracy +0 to +2 points"
+#   git add ask-or-act-changelog.jsonl && git commit -m "expect: prompt v4"
+#   # ... after CI: download the artifact, then
+#   ask-or-act changelog add gate.json
+#
+# Minimal ask-or-act.toml at the repository root:
+#
+#   [gate]
+#   baseline = "eval/baseline.csv"   # predictions of the current main, committed
+#   alpha = 0.10
+#   delta = 0.10
+#   # tolerance = { accuracy = 0.01, calibration = 0.02, coverage = 0.05 }
+#   # require_certified = false     # a lost certificate warns instead of failing
+#   # strict = true                 # fail inconclusive checks (needs large files)
+name: ask-or-act gate
+
+on:
+  pull_request: # never pull_request_target: it would run fork code with a write token
+
+permissions:
+  contents: read
+  pull-requests: write # the comment only
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Your step: run the PR's model or prompt on the eval set and write
+      # predictions.csv with columns id, prediction, confidence, human_label.
+      # Use recorded responses or a fixed eval set; ask-or-act itself needs no network.
+      - name: Predict
+        run: python eval/predict.py --out predictions.csv
+
+      # Pin the action to a full commit SHA of a release, not a branch or tag.
+      - uses: samadarsh/ask-or-act@COMMIT_SHA # replace COMMIT_SHA, e.g. with the v0.x release's
+        with:
+          new: predictions.csv
+          change: ${{ github.event.pull_request.title }} # passed via env: safe to use
