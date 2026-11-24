@@ -459,3 +459,10 @@ def test_gate_fixtures_match_their_script(tmp_path: Path) -> None:
     make_fixtures.main(tmp_path)
     for name in make_fixtures.FILES:
         assert (tmp_path / name).read_bytes() == (make_fixtures.HERE / name).read_bytes(), name
+
+
+def test_inconclusive_tolerance_wording(unsure: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    gate("redraw.csv", "--baseline", "base.csv", "--tolerance", "accuracy=0.01,coverage=0.05")
+    out = words(capsys.readouterr().out)
+    assert "-point)" not in out
+    assert re.search(r"\(tolerance (1 point|5 points|0\.02)\)", out) or "inconclusive" not in out
