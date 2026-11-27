@@ -288,3 +288,19 @@ These are rough, and are meant only for reading a null result:
   reason.
 - **No raw Aegis text anywhere**: ids and aggregates only. Run `audit-redaction` before
   any commit.
+
+## Amendments
+
+### Amendment 1 (2026-11-27 UTC): date correction only
+
+Two dates in the frozen text are the author's local (IST) date, not UTC. Dates are UTC
+everywhere, so they are corrected here. The frozen text above is left as it was.
+
+- "What was seen", "Response metadata, for S6 only": "On 2026-11-28" should read **on
+  2026-11-27, 23:05–23:07 UTC**.
+- S6, "When and how the 5% was chosen": "on 2026-11-28 (UTC)" should read **on
+  2026-11-27 (UTC), at 23:06 UTC**. The threshold was first written in draft commit
+  f2e92bd (2026-11-27 23:06:59 UTC).
+
+Nothing else changes. The registration time is still the freeze commit dc2ea31's,
+2026-11-27 23:12:15 UTC. No analysis has run under this plan, so no result is affected.
