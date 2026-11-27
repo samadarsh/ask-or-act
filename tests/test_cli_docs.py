@@ -1,10 +1,12 @@
 """The terminal sessions in docs/cli-design.md marked *real output* are real.
 
 Each block preceded by ``<!-- real output (exit N) -->`` starts with ``$ ask-or-act …``.
-The test runs that command in-process in a copy of tests/fixtures/predictions/, with stdout and
-stderr in one buffer (the order a terminal would show), and compares the result with
-the block and the exit code with N. Change the output, and the document must change
-too.
+The test runs that command in-process in a copy of tests/fixtures/predictions/ (with
+tests/fixtures/gate/ as its gate/ folder), with stdout and stderr in one buffer (the
+order a terminal would show), and compares the result with the block and the exit code
+with N. Change the output, and the document must change
+too. The one thing that differs between runs, the gate's run time ("1.7 s."), is
+compared as a placeholder.
 """
 
 import contextlib
@@ -22,6 +24,19 @@ from ask_or_act.cli import main
 ROOT = Path(__file__).parent.parent
 DOC = ROOT / "docs" / "cli-design.md"
 FIXTURES = Path(__file__).parent / "fixtures" / "predictions"
+GATE_FIXTURES = Path(__file__).parent / "fixtures" / "gate"
+SECONDS = re.compile(r"\b\d+\.\d s\.")
+
+
+def _copy_fixtures(work: Path) -> None:
+    shutil.copytree(FIXTURES, work)
+    shutil.copytree(GATE_FIXTURES, work / "gate", ignore=shutil.ignore_patterns("*.py"))
+
+
+def _same(text: str) -> str:
+    return SECONDS.sub("N s.", text.rstrip())
+
+
 BLOCK = re.compile(r"<!-- real output \(exit (\d+)\) -->\n```console\n(.*?)\n```", re.S)
 
 
@@ -48,12 +63,12 @@ def test_documented_session_matches_real_output(
     for name in ("NO_COLOR", "FORCE_COLOR", "TERM"):
         monkeypatch.delenv(name, raising=False)
     work = tmp_path / "fixtures"  # a copy, so a command that saves a file can't touch the repo
-    shutil.copytree(FIXTURES, work)
+    _copy_fixtures(work)
     monkeypatch.chdir(work)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
         got = main(shlex.split(command)[1:])
-    assert buf.getvalue().rstrip() == expected.rstrip()
+    assert _same(buf.getvalue()) == _same(expected)
     assert got == code
 
 
@@ -67,7 +82,7 @@ def _rewrite() -> None:
     text = DOC.read_text(encoding="utf-8")
     here = Path.cwd()
     tmp = tempfile.TemporaryDirectory()
-    shutil.copytree(FIXTURES, Path(tmp.name) / "fixtures")
+    _copy_fixtures(Path(tmp.name) / "fixtures")
     os.chdir(Path(tmp.name) / "fixtures")
 
     def run(m: re.Match[str]) -> str:

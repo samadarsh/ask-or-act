@@ -2,8 +2,43 @@
 
 `ask-or-act gate NEW --baseline BASE` compares two predictions files paired on the same
 ids and exits 1 only when NEW is **worse than BASE by more than a tolerance, beyond
-statistical noise**. Usage, configuration and CI setup are documented in
-docs/cli-design.md §3.6; this page covers the guarantees and their limits.
+statistical noise**. This page covers how to use it, in a terminal and in CI, and what
+it does and doesn't promise. Real terminal sessions are in docs/cli-design.md §3.6.
+
+## Usage
+
+```sh
+# the baseline: predictions of the current main branch on a fixed, labelled eval set
+ask-or-act gate new.csv --baseline eval/baseline.csv
+
+# say what you changed and what you expect, before seeing the result
+ask-or-act changelog expect --change "prompt v4" --why "shorter instructions" \
+    --expect "accuracy -1 to +1 points" --expect "coverage >= -2 points"
+ask-or-act gate new.csv              # baseline etc. from ask-or-act.toml
+ask-or-act changelog --last 5        # predicted vs observed, run by run
+```
+
+- **Both files** need the same labelled ids, with the same split column if they have
+  one. Without one, each id goes to the calibration or test half by a hash, so the
+  halves match. Different ids exit 6 with the counts.
+- **Each file gets its own threshold**, fitted on its calibration half at α, δ.
+  Accuracy, calibration and coverage are measured on the test half.
+- **Exit codes:** 0 pass, 1 fail, 2 usage or config error, 6 bad input, 7 too few
+  labelled rows, 70 a bug (never 1, so a crash can't pass for a failed gate).
+- **`--json`** prints one document: every check, the p-values, the thresholds, and the
+  changelog entry. **`-o gate.md`** also writes Markdown.
+
+**Expectations.** The grammar is `METRIC LOW to HIGH [UNIT]`, `METRIC >= X` or
+`METRIC <= X`. Metrics: accuracy and coverage (in points), calibration (the ACE gap)
+and ece (raw ECE). Both are in `abs`, and lower is better. A prediction *holds* when the
+observed change is inside the range. It *missed, beyond noise* when the whole interval
+is outside it.
+
+**Policy.** Flags override `[gate]` in `ask-or-act.toml` (or `[tool.ask-or-act.gate]`
+in `pyproject.toml`), which overrides the defaults. The file is searched for from the
+current folder up to the repository root, never above. All keys are in
+docs/cli-design.md §3.6. Fix the policy before looking at results, and date it with
+`registered`.
 
 ## The four checks
 
@@ -67,8 +102,8 @@ gate prints how many test rows each check would need next to the actual count:
 
 ```
 strict: test rows needed to show each check within its tolerance (approx., 80% chance
-when nothing changed): accuracy ~14,924, calibration ~1,802, coverage ~13,300; this run
-has 957.
+  when nothing changed): accuracy ~15,805, calibration ~630, coverage ~49,951; this run
+  has 1,011.
 ```
 
 The estimate is a normal approximation. It reads the standard error off the run's own
@@ -77,6 +112,72 @@ half, and solves for an 80% chance that an unchanged model passes:
 n = n_now · ((z₁₋ₗₑᵥₑₗ + z₀.₈) · SE / tolerance)². A tolerance of 0 can never be shown.
 JSON output has the same numbers under `result.rows_needed`. Turn on strict mode only
 when those numbers are below your file size, or widen the tolerances.
+
+Strict mode is meant for large production logs. For most teams the default mode is the
+right choice: it fails only on proven drops and reports inconclusive checks openly. With
+wider tolerances (accuracy 3 points, coverage 10 points) the same files need about
+1,757, 630 and 12,488 rows, so a log of 12,500 labelled decisions can run strict.
+
+## In CI (GitHub Actions)
+
+`action.yml` at the root of this repository is a composite Action. Copy
+[examples/github/gate.yml](../examples/github/gate.yml) to `.github/workflows/` and
+replace its "Predict" step with yours:
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write   # the comment only
+steps:
+  - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+  - run: python eval/predict.py --out predictions.csv   # yours
+  # REPLACE COMMIT_SHA: replace with the release commit SHA after v1.0
+  # (until then, the full SHA of a commit on main; never a branch or tag)
+  - uses: samadarsh/ask-or-act@COMMIT_SHA
+    with:
+      new: predictions.csv
+      change: ${{ github.event.pull_request.title }}
+```
+
+**What it does:**
+- installs ask-or-act from the Action's own checkout (locked, no PyPI);
+- runs the gate with `--no-record --json -o gate.md`;
+- writes the Markdown to the job summary and uploads `gate.json` and `gate.md` as an
+  artifact;
+- comments on the pull request;
+- fails the job with the gate's exit code.
+
+**The comment.** There is one comment per PR, found by a hidden marker and edited on
+every push, so it never overwrites another bot's comment.
+- **Forks:** a fork's token is read-only, so fork PRs get no comment. The job summary
+  and the artifact still show the result. Don't switch to `pull_request_target` to get
+  one: it would run the fork's code with a write token.
+
+**The changelog in CI.** CI never writes to the repository (no `contents: write`), so
+it doesn't append. To keep the entry, download the artifact and run
+`ask-or-act changelog add gate.json` locally, then commit the changelog. For
+expectations recorded before the run:
+1. run `ask-or-act changelog expect` locally;
+2. commit the changelog with the PR;
+3. the CI gate run picks the expectation up.
+
+**Inputs:** `new` (required), `baseline`, `change`, `why`, `expect` (one per line),
+`fail-on-inconclusive`, `args` (extra flags, split on spaces), `working-directory`,
+`comment`, `artifact-name`, `python-version` and `github-token`. **Outputs:** `result`
+(pass, fail or error), `exit-code`, `json`, `markdown`.
+
+**Security:**
+- every input reaches the shell through `env:`, so a PR title can't inject commands;
+- the third-party actions are pinned to commit SHAs.
+
+`tests/test_action.py` checks both, and this repository's own workflow
+(`.github/workflows/gate.yml`) runs the Action on synthetic fixtures for every change.
+
+## Run time
+
+About 1.7 s for two 2,000-row files with 2,000 resamples, on an Apple-silicon laptop,
+refitting both thresholds in every resample. On GitHub's runners it took about 3.4 s.
+`--n-boot` trades precision for time.
 
 ## Limits
 

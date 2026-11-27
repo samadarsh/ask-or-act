@@ -9,10 +9,9 @@ query to, whether a message is safe, which of two answers is better, whether an 
 should *act*, *ask* a clarifying question, or *escalate*. `ask-or-act` is an open-source
 Python toolkit that evaluates and calibrates those decisions.
 
-> **Status:** milestones 0–5 work: data, core, metrics, deciders, guaranteed thresholds,
-> judge mode and the HTML report. The benchmark study is running. The "bring your own
-> predictions" CLI is being built: `check`, `thresholds`, `metrics`, `compare`,
-> `report` and `demo` work; the CI `gate` is next ([docs/cli-design.md](docs/cli-design.md)).
+> **Status:** milestones 0–6 work: data, core, metrics, deciders, guaranteed thresholds,
+> judge mode, the HTML report and the "bring your own predictions" CLI, including the CI
+> `gate` and its decision changelog. The benchmark study (milestone 7) is running.
 
 ## What it will do
 
@@ -55,10 +54,44 @@ or one JSON document with `--json`. The same functions are a Python API
 [docs/cli-design.md](docs/cli-design.md) has the design.
 
 **Runs locally.** The analysis commands (`check`, `thresholds`, `metrics`, `compare`,
-`report`, `demo`) make no network connections and send no telemetry, and the report page loads
+`report`, `demo`, `gate`, `changelog`) make no network connections and send no telemetry, and the report page loads
 nothing from elsewhere. A test enforces this
 (`tests/test_local_only.py`). Only `run` calls model APIs, and only when you approve
 the cost.
+
+## Gate CI on your AI's decisions
+
+`ask-or-act gate` compares a new predictions file with a baseline on the same ids. It
+exits 1 only when the new file is **worse by more than a tolerance, beyond noise**:
+
+- accuracy (Tango's score test);
+- accuracy-controlled calibration (the ACE gap);
+- coverage at your target risk;
+- whether the guarantee still holds.
+
+```sh
+ask-or-act gate new.csv --baseline eval/baseline.csv --expect "accuracy +0 to +2 points"
+ask-or-act changelog --last 5      # what changed, what you expected, what happened
+```
+
+- **Tolerances** default to 1 point of accuracy, 0.02 of calibration and 5 points of
+  coverage. The policy lives in `ask-or-act.toml`, next to your code.
+- **The false-FAIL rate is measured.** When nothing changed it is at most 5%, and 1.0%
+  in a simulation with the defaults ([docs/gate-simulation.md](docs/gate-simulation.md)).
+- **The decision changelog** records the expected effect *before* the run and checks it
+  against what happened. Reruns don't get a second guess.
+- **On GitHub,** a composite Action comments the result on the pull request:
+
+```yaml
+# REPLACE COMMIT_SHA: replace with the release commit SHA after v1.0
+# (until then, the full SHA of a commit on main; never a branch or tag)
+- uses: samadarsh/ask-or-act@COMMIT_SHA
+  with:
+    new: predictions.csv
+```
+
+[docs/gate.md](docs/gate.md) covers what the gate promises and how to set up CI. A full
+workflow to copy is in [examples/github/gate.yml](examples/github/gate.yml).
 
 See [docs/research.md](docs/research.md) for the papers this builds on and
 [docs/datasets.md](docs/datasets.md) for the benchmark datasets.

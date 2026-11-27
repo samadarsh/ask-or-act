@@ -56,6 +56,9 @@ uv run ask-or-act metrics preds.csv                # test half by default; --all
 uv run ask-or-act compare a.csv b.csv              # paired tests + ACE on the same ids
 uv run ask-or-act report preds.csv [b.csv] -o r.html  # HTML page for 1-3 files (TARGET α)
 uv run ask-or-act demo                             # example file + report in a new ./ask-or-act-demo/
+uv run ask-or-act gate new.csv --baseline base.csv  # M6 CI gate: exit 1 only if worse beyond noise
+uv run ask-or-act changelog [--last N]             # decision changelog; `changelog expect` before a run
+uv run python scripts/gate_simulation.py          # the gate's false-FAIL/power simulation (~4 min)
 uv run python -m tests.test_cli_docs --write       # refresh docs/cli-design.md real-output blocks
 uv run ask-or-act judge runs/<mt_bench-run>        # M4 judge mode: agreement, position/length/ties
 uv run ask-or-act report runs/<a> runs/<b> ...     # M5 static HTML report -> reports/report.html
@@ -132,7 +135,9 @@ All four must pass before a change is done.
 5. Reports and CLI
 6. CI gate and changelog
 7. Benchmark study
-8. Release
+8. Release. Checklist:
+   - [ ] Update the Action snippet's SHA: replace `COMMIT_SHA` with the release commit
+     SHA in README.md, docs/gate.md and examples/github/gate.yml.
 
 ## Design notes for later milestones
 
@@ -245,6 +250,10 @@ All four must pass before a change is done.
   approval. Analysis-only code (metrics, guarantees, judge, report) may change freely.
 
 **CI gate and decision changelog (M6)**
+- **Implemented (2026-11-24):** `gate.py`, `changelog.py`, `gate_markdown.py`,
+  `project_config.py`, `metrics/tango.py`, `action.yml` (docs/gate.md). The Action's
+  security rules (SHA pins, inputs via env, no pull_request_target, no contents: write)
+  are tested in `tests/test_action.py`; keep them when editing workflows.
 - Inspired by Self-Improvement Memory (arXiv 2611.18856). Every run appends an entry
   with:
   - the root cause it addresses

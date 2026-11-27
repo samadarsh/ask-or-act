@@ -46,8 +46,10 @@ jobs:
       - name: Predict
         run: python eval/predict.py --out predictions.csv
 
-      # Pin the action to a full commit SHA of a release, not a branch or tag.
-      - uses: samadarsh/ask-or-act@COMMIT_SHA # replace COMMIT_SHA, e.g. with the v0.x release's
+      # !!! REPLACE COMMIT_SHA: replace with the release commit SHA after v1.0. !!!
+      # Until then, use the full SHA of a commit on main. Always a full commit SHA,
+      # never a branch or tag. As written, this line fails: COMMIT_SHA is not a commit.
+      - uses: samadarsh/ask-or-act@COMMIT_SHA # <-- REPLACE (release commit SHA after v1.0)
         with:
           new: predictions.csv
           change: ${{ github.event.pull_request.title }} # passed via env: safe to use

@@ -3,7 +3,8 @@
     uv run python tests/fixtures/gate/make_fixtures.py
 
 The files are committed; this script documents how they were made, and a test checks
-they still match it. No text, no real data: ids, labels and numbers from fixed seeds.
+they still match it. No text, no real data: ids, support-ticket intents and numbers from fixed
+seeds.
 2,000 items share one difficulty draw (Beta(5, 1)), so the files are paired the way
 real ones are (the same model as scripts/gate_simulation.py):
 
@@ -19,20 +20,25 @@ import numpy as np
 
 HERE = Path(__file__).parent
 N = 2000
+INTENTS = ("refund", "card_lost", "card_declined", "transfer_pending", "change_pin", "top_up")
 
 
 def write(path: Path, *, seed: int, shift: float = 0.0) -> None:
-    p = np.clip(np.random.default_rng(0).beta(5.0, 1.0, N), 0.02, 0.995)
+    items = np.random.default_rng(0)
+    p = np.clip(items.beta(5.0, 1.0, N), 0.02, 0.995)
+    label = items.integers(0, len(INTENTS), N)
     rng = np.random.default_rng(1000 + seed)
     q = np.clip(p + shift, 0.01, 0.999)
     right = rng.uniform(size=N) < q
     z = np.log(q / (1 - q)) + rng.normal(0.0, 0.35, N)
     conf = np.clip(1 / (1 + np.exp(-z)), 0.001, 0.999)
+    wrong = (label + rng.integers(1, len(INTENTS), N)) % len(INTENTS)  # another intent
     with path.open("w", newline="") as f:
         w = csv.writer(f, lineterminator="\n")
         w.writerow(["id", "prediction", "confidence", "human_label"])
         for i in range(N):
-            w.writerow([f"t{i:05d}", "yes" if right[i] else "no", f"{conf[i]:.4f}", "yes"])
+            pred = INTENTS[label[i]] if right[i] else INTENTS[wrong[i]]
+            w.writerow([f"t{i:05d}", pred, f"{conf[i]:.4f}", INTENTS[label[i]]])
 
 
 FILES = {

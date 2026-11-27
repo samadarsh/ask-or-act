@@ -530,31 +530,170 @@ regenerate with the commands above).
 
 ### 3.6 `gate` (milestone 6): pass or fail in CI
 
+`gate NEW --baseline BASE` pairs the two files on the same ids and exits 1 only when NEW
+is worse than BASE by more than a tolerance, beyond noise. A regressed file (8 points
+less accurate):
+
+<!-- real output (exit 1) -->
 ```console
-$ ask-or-act gate predictions.csv --policy ask-or-act.toml
-policy ask-or-act.toml (α = 0.10, δ = 0.10, min coverage 70%, baseline main.csv)
-  ✓ threshold certified: act ≥ 0.87
-  ✓ coverage 74% ≥ 70%
-  ✗ accuracy vs baseline: 81.0% vs 83.2% (−2.2 points [−3.9, −0.5]): worse
-FAIL: 1 of 3 checks failed.
-$ echo $?
-1
+$ ask-or-act gate gate/regressed.csv --baseline gate/base.csv --no-record --expect "accuracy -1 to +1 points"
+gate: regressed.csv vs baseline base.csv, paired on 1,011 test / 989 calibration ids (α
+  = 0.1, δ = 0.1; tolerances: accuracy 1 point, calibration 0.02, coverage 5 points)
+  ✗ accuracy     74.3% vs 83.8%: -9.5 points [-12.4, -6.6], worse beyond the 1-point
+    tolerance (Holm p = 2e-06)
+  ✓ calibration  ECE 0.058 vs 0.085 accuracy-controlled: -0.027 [-0.057, -0.005], within
+    the 0.02 tolerance
+  ✗ coverage     0% vs 70% at α = 0.1: -70.1 points [-81.7, -63.5], worse beyond the
+    5-point tolerance (Holm p = 0.001)
+  ✗ certified    lost: new: nothing certified; baseline: act ≥ 0.778 (α = 0.1, δ = 0.1)
+FAIL: 3 of 4 checks failed (accuracy, coverage, certified).
+expected:
+  accuracy -1 to +1 points: missed (observed -9.5 points, beyond noise)
+Intervals are 90% (two one-sided 0.05 tests); the paired checks' p-values are
+  Holm-adjusted. Coverage refits both thresholds in each of 2,000 resamples
+  (approximate). 1.8 s.
 ```
 
-The policy lives in a project file, version-controlled:
+Another run of the same model passes. Two checks are *inconclusive*: with ~1,000 test
+rows, neither "worse" nor "within 1 point" can be shown, and that passes by default:
+
+<!-- real output (exit 0) -->
+```console
+$ ask-or-act gate gate/candidate.csv --baseline gate/base.csv --no-record
+gate: candidate.csv vs baseline base.csv, paired on 1,011 test / 989 calibration ids (α
+  = 0.1, δ = 0.1; tolerances: accuracy 1 point, calibration 0.02, coverage 5 points)
+  ? accuracy     82.3% vs 83.8%: -1.5 points [-4.1, +1.1], inconclusive: could be up to
+    4.1 points worse (tolerance 1 point)
+  ✓ calibration  ECE 0.021 vs 0.048 accuracy-controlled: -0.027 [-0.058, -0.017], within
+    the 0.02 tolerance
+  ? coverage     60% vs 70% at α = 0.1: -10.5 points [-33.7, +11.9], inconclusive: could
+    be up to 33.7 points worse (tolerance 5 points)
+  ✓ certified    new: act ≥ 0.83; baseline: act ≥ 0.778 (α = 0.1, δ = 0.1)
+PASS, with 2 inconclusive (accuracy, coverage): not shown worse, not shown within the
+  tolerance (--fail-on-inconclusive fails these).
+Intervals are 90% (two one-sided 0.05 tests); the paired checks' p-values are
+  Holm-adjusted. Coverage refits both thresholds in each of 2,000 resamples
+  (approximate). 1.8 s.
+```
+
+`--fail-on-inconclusive` (strict mode) fails those, and prints the test rows each
+check would need to be provable:
+
+<!-- real output (exit 1) -->
+```console
+$ ask-or-act gate gate/candidate.csv --baseline gate/base.csv --no-record --fail-on-inconclusive -q
+gate: candidate.csv vs baseline base.csv, paired on 1,011 test / 989 calibration ids (α
+  = 0.1, δ = 0.1; tolerances: accuracy 1 point, calibration 0.02, coverage 5 points;
+  strict)
+  ? accuracy     82.3% vs 83.8%: -1.5 points [-4.1, +1.1], inconclusive: could be up to
+    4.1 points worse (tolerance 1 point)
+  ✓ calibration  ECE 0.021 vs 0.048 accuracy-controlled: -0.027 [-0.058, -0.017], within
+    the 0.02 tolerance
+  ? coverage     60% vs 70% at α = 0.1: -10.5 points [-33.7, +11.9], inconclusive: could
+    be up to 33.7 points worse (tolerance 5 points)
+  ✓ certified    new: act ≥ 0.83; baseline: act ≥ 0.778 (α = 0.1, δ = 0.1)
+FAIL: 2 of 4 checks failed (accuracy, coverage).
+strict: test rows needed to show each check within its tolerance (approx., 80% chance
+  when nothing changed): accuracy ~15,805, calibration ~630, coverage ~49,951; this run
+  has 1,011.
+Intervals are 90% (two one-sided 0.05 tests); the paired checks' p-values are
+  Holm-adjusted. Coverage refits both thresholds in each of 2,000 resamples
+  (approximate). 1.8 s.
+```
+
+Strict mode is meant for large production logs. For most teams the default mode (fails
+only on proven drops, reports inconclusive checks openly) is the right choice. Strict
+mode becomes usable with suitable settings: with accuracy 3 points and coverage 10
+points, the same files need ~1,757 / ~630 / ~12,488 rows, a size a production log
+reaches:
+
+<!-- real output (exit 1) -->
+```console
+$ ask-or-act gate gate/candidate.csv --baseline gate/base.csv --no-record --fail-on-inconclusive -q --tolerance accuracy=0.03,coverage=0.10
+gate: candidate.csv vs baseline base.csv, paired on 1,011 test / 989 calibration ids (α
+  = 0.1, δ = 0.1; tolerances: accuracy 3 points, calibration 0.02, coverage 10 points;
+  strict)
+  ? accuracy     82.3% vs 83.8%: -1.5 points [-4.1, +1.1], inconclusive: could be up to
+    4.1 points worse (tolerance 3 points)
+  ✓ calibration  ECE 0.021 vs 0.048 accuracy-controlled: -0.027 [-0.058, -0.017], within
+    the 0.02 tolerance
+  ? coverage     60% vs 70% at α = 0.1: -10.5 points [-33.7, +11.9], inconclusive: could
+    be up to 33.7 points worse (tolerance 10 points)
+  ✓ certified    new: act ≥ 0.83; baseline: act ≥ 0.778 (α = 0.1, δ = 0.1)
+FAIL: 2 of 4 checks failed (accuracy, coverage).
+strict: test rows needed to show each check within its tolerance (approx., 80% chance
+  when nothing changed): accuracy ~1,757, calibration ~630, coverage ~12,488; this run
+  has 1,011.
+Intervals are 90% (two one-sided 0.05 tests); the paired checks' p-values are
+  Holm-adjusted. Coverage refits both thresholds in each of 2,000 resamples
+  (approximate). 1.8 s.
+```
+
+**The checks.**
+- accuracy: Tango's (1998) score test, Eq. (24)–(26), with the tolerance as its margin;
+- calibration: the ACE gap, accuracy-controlled;
+- coverage at α: both thresholds refitted in every bootstrap resample (approximate);
+- certified: a lost certificate fails.
+
+The three paired checks are Holm-adjusted. What the 5% false-FAIL bound covers, and
+what it doesn't (the tolerance edge, the certification check), is in docs/gate.md.
+
+**The policy** lives in the repository: `ask-or-act.toml`, or `[tool.ask-or-act.gate]` in
+`pyproject.toml`. It's found from the current folder up to the repository root, never
+above, and flags override it. `--no-config` ignores it.
 
 ```toml
 # ask-or-act.toml
 [gate]
+baseline = "eval/baseline.csv"   # relative to this file
 alpha = 0.10
 delta = 0.10
-min_coverage = 0.70
-baseline = "baselines/main.csv"   # paired: must not be significantly worse
-registered = "2026-12-01"         # when this policy was fixed (UTC)
+tolerance = { accuracy = 0.01, calibration = 0.02, coverage = 0.05 }  # the defaults
+level = 0.05                     # one-sided, Holm-adjusted
+require_certified = true         # false: a lost certificate only warns
+strict = false                   # true: inconclusive checks fail
+require_expectation = false      # true: a run without an expected effect fails
+changelog = "ask-or-act-changelog.jsonl"
+registered = "2026-12-01"        # when this policy was fixed (UTC)
 ```
 
-The decision changelog (record the expected effect *before* the run) is milestone 6's
-own design and isn't fixed here.
+Unknown keys and wrong types exit 2 and name every problem.
+
+**The decision changelog** (after Self-Improvement Memory, arXiv 2611.18856) is one
+JSONL file in the repository. Every gate run appends an entry:
+- what changed and why;
+- the expected effect;
+- the observed metrics, and whether each prediction held;
+- the commit, and hashes of both files.
+
+The expected effect counts only if it was written **before** the run:
+
+```console
+$ ask-or-act changelog expect --change "prompt v4" --expect "accuracy -1 to +1 points"
+recorded 2026-12-02T09:14:03Z-5c1e in ask-or-act-changelog.jsonl: the next gate run checks it
+$ ask-or-act gate new.csv            # picks up the open expectation, then closes it
+$ ask-or-act changelog --last 1
+2026-12-02T09:20:41Z  PASS  prompt v4  (3f2a91c04b7e)
+  expected (recorded 6 min before the run):
+    accuracy -1 to +1 points → +0.4 points: held
+
+1 gate run(s) (reruns not counted); predictions held 1 of 1.
+```
+
+- `--expect` also works on the gate command itself; the entry then says "given with
+  the gate run".
+- Running the same files under the same policy again is marked as a rerun, and only
+  the first run's prediction counts. So re-running until the prediction holds doesn't
+  help.
+- `--no-record` doesn't append. The entry is still in `--json` output, and
+  `changelog add gate.json` appends it later (that's how CI works).
+
+**`-o gate.md`** also writes the result as Markdown, for a PR comment or a job summary.
+
+**In CI:** a composite GitHub Action (`action.yml`, `uses: samadarsh/ask-or-act@SHA`)
+runs the gate, posts the Markdown on the pull request and uploads gate.json. The job
+fails when the gate fails. Setup and permissions are in docs/gate.md; a workflow to
+copy is in examples/github/gate.yml.
 
 ### 3.7 `demo`: something working in under 30 seconds
 
@@ -983,7 +1122,9 @@ Each step gets its own commit, after the author's approval.
 - **(c)** *(done 2026-11-23)* `report` on predictions files, with
   `aoa.write_report`.
 - **(d)** *(done 2026-11-24)* `demo`, with a timing test under 30 s.
-- **(e)** `gate` (milestone 6).
+- **(e)** *(done 2026-11-24)* `gate` and `changelog` (milestone 6): (e1) the gate,
+  changelog and config file; (e2) `-o` Markdown, the GitHub Action and the example
+  workflow; (e3) these docs.
 
 As each command lands, its mock-up session in §3 becomes *real output*, pinned by
 `tests/test_cli_docs.py`.
