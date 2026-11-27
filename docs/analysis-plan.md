@@ -224,6 +224,11 @@ serves a model name in between.
 - **What counts as a change:** a fingerprint that first appears after the model's
   earliest calibration call on that dataset, used by more than 5% of the calls of any
   of that model's study runs on that dataset.
+  - **When and how the 5% was chosen:** on 2026-11-28 (UTC), after seeing the
+    fingerprint counts, from metadata only, with no outcomes. qwen3.8-27b's stray new
+    fingerprints had 1 call (11-24) and 4 calls (11-25). The two new ones on 11-26 and
+    11-27 had about 18% and 28% of that day's calls. The threshold separates those two
+    cases.
 - **If there is a change:** that model's results on that dataset are also reported
   split by period, before and after the day the new fingerprint first appeared. Q2 and
   Q4 are also reported with the calibration and test calls restricted to fingerprints
