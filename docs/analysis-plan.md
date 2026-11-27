@@ -14,12 +14,25 @@ From the study runs (`configs/study/`), up to the freeze:
 
 - **Progress and invalid-output rates**, from `study status` and the daily summaries:
   gpt-oss-safeguard-20b 0.1%, 0.0%, 1.1% and 1.0% per config.
-- **One test-half metric, by accident.** On 2026-11-23 at 09:22 UTC, the
-  completed-run guard was checked by running `ask-or-act metrics` on
+- **Quick-check accuracies.** At the end of every config it runs, `ask-or-act run`
+  prints a quick-check accuracy. Completed runs get it on all rows; partial runs (daily
+  limit) get it on the decided rows only.
+  - This happened on calibration and test halves alike.
+  - The author saw these lines, and some were pasted into the chat. Examples:
+    gpt-oss-120b and gpt-oss-20b at 0.870 on Banking77 calibration-sc, and qwen3.8-27b
+    at 0.769 on Banking77 test.
+  - So **accuracies of study runs, including test halves, were seen.**
+- **One `metrics` call on a test half.** On 2026-11-23 at 09:22 UTC, the completed-run
+  guard was checked by running `ask-or-act metrics` on
   `20261123T080137Z-study-qwen3.8-27b-banking77-test-ee0078`, piped through `head -4`.
-  The output was one line: n = 308, 0 errors, 8 unique confidences, and accuracy 0.769
-  [0.721, 0.821]. No calibration, threshold, coverage or comparison result was seen,
-  for any model.
+  It printed n = 308, 0 errors, 8 unique confidences, and the same accuracy (0.769
+  [0.721, 0.821]).
+- **Response metadata, for S6 only.** On 2026-11-28, while S6 was being drafted, the
+  cache was checked for a model fingerprint. Only these were read: the field names,
+  and the `system_fingerprint` values counted per model and UTC day. No answers or
+  confidences were read.
+- **No calibration, threshold, coverage or comparison result has been seen** for any
+  study model: no ECE, Brier, ACE gap, λ̂, coverage, risk at a threshold, or paired test.
 - **The pilot and smoke runs** (20 test examples per dataset, docs/study.md): accuracy
   and ECE for those 20. That's why the seen-id sensitivity check (S1) exists.
 
@@ -83,6 +96,10 @@ No analysis code has been run on any study calibration half.
   - DA's ESS/N, flagged below 0.5.
 - **Reported for each decider:** ECE (width and mass bins), Brier, AURC, the number of
   unique confidence values, and the ECE noise floor.
+- **Claims about one decider on its own are descriptive, not tests.** That includes
+  "overconfident", "underconfident" and "ECE above its noise floor". They are reported
+  with their CIs and noise floors, outside every family, and never as a finding of
+  significance. Only the paired DA tests in F1 and F1b rank deciders.
 - **The answer:** a ranking is stated only where the Holm-adjusted DA tests separate
   deciders. Otherwise the result is "not separated at this sample size", with the CIs.
 - **Q1b (secondary), family F1b, 9 tests: does self-consistency calibrate better than
@@ -150,8 +167,11 @@ No analysis code has been run on any study calibration half.
   - MT-Bench: 2.
 - **No theorem covers this.** The guarantee assumes the same decider. That's why it's
   tested, not assumed.
-- **Test, family F4 (20 tests):** the one-sided exact binomial test of Q2, on B's
+- **Test, family F4 (up to 20 tests):** the one-sided exact binomial test of Q2, on B's
   acted-on test examples at λ̂_A, Holm-adjusted.
+- **Pairs drop out of F4 when model A certifies nothing** on its calibration half: there
+  is no threshold to transfer. They are listed by name, and F4's size is reported after
+  the drops.
 - **Reported for each pair, against B's own λ̂_B on the same test examples:**
   - the difference in coverage and in risk;
   - a paired bootstrap over B's test examples, with both thresholds held fixed. So it
@@ -165,14 +185,14 @@ No analysis code has been run on any study calibration half.
   - F1: 19 tests;
   - F1b: 9 tests;
   - F2: one per certified configuration;
-  - F4: 20 tests.
+  - F4: up to 20 tests (pairs whose model A certifies nothing drop out).
 
   Holm controls the family-wise error at 0.05 within each.
 - **The families aren't corrected against each other.** Each answers its own question
   and is reported with its own family. This is stated next to the results.
 - **Family size can shrink, but only for two reasons:** a model stopped by the 2%
-  invalid-output rule, or a configuration that certifies nothing. Every dropped test is
-  listed with its reason. Results are never selected.
+  invalid-output rule, or a configuration that certifies nothing (in F2 and F4). Every
+  dropped test is listed with its reason. Results are never selected.
 - **Everything outside F1, F1b, F2 and F4 is exploratory:** the per-pair M2 comparison
   tables, judge-mode statistics, the α grid and the exploratory transfers. They show CIs
   and unadjusted p-values and are labelled exploratory.
@@ -189,6 +209,29 @@ headline says so.
 | S3 | **MT-Bench α against the human ceiling** (`--alpha-vs-human`, α = 1 − h on the calibration votes) | Q2, Q3 on MT-Bench |
 | S4 | **Disjoint cascade calibration** (`--disjoint`: each stage gets its own seeded share) | the Q3 cascades |
 | S5 | **Failed calls excluded** instead of counted as wrong | Q1–Q3 |
+| S6 | **Model drift** (below) | Q1–Q4 |
+
+**S6, model drift.** The halves were run on different days, and Groq may change what
+serves a model name in between.
+
+- **Dates:** for each calibration and test run, the UTC dates of its decisions, taken
+  from each response's `created` time, not the run id. A run resumed from the cache has
+  calls from several days.
+- **Fingerprints:** every saved Groq response has a `system_fingerprint`. A model has
+  a pool of them, used in parallel: about 40 for each gpt-oss model, and 4 for
+  qwen3.8-27b on 2026-11-20 to 11-25. So a fingerprint seems to mark a serving
+  configuration rather than a model version. Groq doesn't document its meaning.
+- **What counts as a change:** a fingerprint that first appears after the model's
+  earliest calibration call on that dataset, used by more than 5% of the calls of any
+  of that model's study runs on that dataset.
+- **If there is a change:** that model's results on that dataset are also reported
+  split by period, before and after the day the new fingerprint first appeared. Q2 and
+  Q4 are also reported with the calibration and test calls restricted to fingerprints
+  seen in both halves. The primary result stays as is, and the split is reported next
+  to it.
+- **Limitation:** an unchanged fingerprint pool doesn't prove an unchanged model,
+  because weights or serving could change without a new fingerprint. This is stated
+  with the results.
 
 The Banking77 registration timing gets no re-analysis. It is disclosed with every
 Banking77 headline.
@@ -203,6 +246,16 @@ These are rough, and are meant only for reading a null result:
 - **Q2 and Q4:** with about 200 acted-on test examples at α = 0.10, a true risk of 0.15
   is detected about 70% of the time before Holm. Smaller violations are mostly missed,
   and a non-rejection says only that.
+- **Self-consistency subsets are small:**
+  - Banking77: 77 per half;
+  - Aegis: 100;
+  - MT-Bench: about 50 votes, so even fewer comparisons.
+
+  Their grid has only k + 1 = 4 steps, and they get one scan start. So certification
+  there may be nearly impossible. At α = 0.10, even an error-free top step needs about
+  22 acted-on examples to pass the exact test at δ = 0.1.
+  - A null in Q1b, or "not certified" in Q2 for self-consistency, mostly reflects the
+    sample size. It is reported that way, not as evidence against the signal.
 
 ## How results are reported
 
