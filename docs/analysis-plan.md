@@ -1,7 +1,8 @@
 # Milestone 7 analysis plan (pre-registered)
 
-**Status: DRAFT, not yet frozen.** It's frozen by the commit that changes this line to
-"FROZEN" and is dated by that commit's UTC time. After the freeze, any change is a dated
+**Status: FROZEN.** Frozen by the commit that changed this line from DRAFT to
+"FROZEN", and dated by that commit's UTC time (`git log --format='%H %cI' -1 --
+docs/analysis-plan.md` at that commit). After the freeze, any change is a dated
 amendment at the end of this file, and every result produced under an amendment says so.
 
 **What it is:** the full list of analyses for the benchmark study (docs/study.md),
