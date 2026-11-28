@@ -304,3 +304,139 @@ everywhere, so they are corrected here. The frozen text above is left as it was.
 
 Nothing else changes. The registration time is still the freeze commit dc2ea31's,
 2026-11-27 23:12:15 UTC. No analysis has run under this plan, so no result is affected.
+
+### Amendment 2 (2026-11-28 UTC): Q1's measure, and S6's reading
+
+Written on 2026-11-28 (UTC), before any analysis ran on a study run. The frozen text
+above is left as it was. Every result produced under this plan says "Amendment 2".
+
+**Why.** While the analysis script was tested on fake data, two *perfectly calibrated*
+fake deciders with different accuracies came out with large DA and IA gaps. The numbers
+are from a simulation with 200,000 examples per decider and 15 equal-width bins:
+
+| accuracy A vs B | raw ECE gap | DA gap | IA gap |
+|---|---|---|---|
+| 0.800 vs 0.626 | +0.000 | +0.159 | −0.144 |
+| 0.849 vs 0.750 | −0.002 | +0.091 | −0.084 |
+| 0.799 vs 0.800 | −0.000 | −0.000 | −0.001 |
+
+- The author then checked arXiv 2606.30814 v2 §4.2 against `metrics/ace.py`: the code
+  matches the paper. DA reweights examples by correctness only and leaves the
+  confidences unchanged.
+- So this is a property of DA, not a bug: under DA a perfectly calibrated decider looks
+  miscalibrated whenever the two accuracies differ. DA penalises the more accurate
+  decider, and IA favours it by about as much.
+- The paper says this itself: DA "aligns only the overall distribution of correct and
+  incorrect outcomes", and the views are meant to be read jointly.
+- In the study, accuracies differ by several points within each dataset. A DA test
+  there would partly measure the accuracy gap, which Q1 doesn't ask about.
+
+**A second problem, found the same way: the noise floors.** Raw ECE is biased upward on
+finite samples, and by how much depends on n and on how many distinct confidence values
+a decider uses. Self-consistency has 4 values and verbalized confidence has ~100, so a
+raw-ECE gap between them partly measures their different floors.
+
+- On the fakes, MT-Bench Q1b (n = 25): raw gap +0.200, floors 0.171 (verbalized) and
+  0.091 (self-consistency).
+- So the measure below subtracts each decider's own floor.
+
+**What had been seen when both were found:** fake data and the paper only, plus
+everything listed in "What was seen before this plan".
+
+- No study calibration, threshold or comparison result had been seen.
+- The analysis script had not read any study decision. It refuses to until every study
+  run is complete.
+- The free baselines (classic, majority) were re-run from the cache at $0, so the script
+  could be checked against docs/guarantees.md. They aren't study runs and aren't in F1.
+
+**Changes:**
+
+1. **Q1 and Q1b primary measure: the paired gap in excess ECE.**
+   - A decider's excess ECE is its raw top-label ECE minus its own noise-floor mean.
+     The floor is the seeded simulation of a perfectly calibrated decider with the same
+     n and the same confidence values (`ece_noise_floor`: 500 simulations, seed 0).
+   - Both use the frozen binning: 15 equal-width bins, the same as the DA test used.
+   - The tested gap is (ECE_A − floor_A) − (ECE_B − floor_B). The floors are a fixed
+     adjustment: they move the estimate, not the resampled spread. So the test asks
+     whether the ECE gap is beyond what the two floors explain.
+   - The test is unchanged otherwise: a two-sided centered paired bootstrap, 2,000
+     resamples, seed 0, resampled by question on MT-Bench. The families are unchanged:
+     F1 has 19 tests and F1b has 9, each Holm at FWER 0.05.
+   - The raw ECE gap is reported next to it, descriptively, with both noise floors (mean
+     and 95th percentile).
+   - **Checked by simulation before approval** (`scripts/excess_ece_null.py`, 500
+     repetitions per row, 2,000 resamples, rejection at p ≤ 0.05 before Holm). Both
+     deciders are perfectly calibrated, so every rejection is a false positive:
+
+     | A vs B | n | outcomes | excess-ECE test | raw-ECE test |
+     |---|---|---|---|---|
+     | 4 values vs 0.01 steps | 25 | independent | 0.8% | 23.0% |
+     | 4 values vs 0.01 steps | 25 | shared | 0.4% | 22.0% |
+     | 4 values vs 0.01 steps | 300 | independent | 0.4% | 17.6% |
+     | 4 values vs 0.01 steps | 300 | shared | 0.2% | 19.2% |
+     | 0.01 steps vs 0.01 steps | 25 | independent | 1.4% | 1.6% |
+     | 0.01 steps vs 0.01 steps | 300 | independent | 0.2% | 0.2% |
+
+     "Shared" draws one uniform per example for both deciders, so their errors are
+     positively correlated, as on real paired data. The excess test stays below 5%
+     everywhere. The raw test rejects 18–23% when the granularities differ.
+   - **It is conservative:** 0.2–1.4% where 5% is allowed. This is the centered
+     bootstrap on ECE itself: the raw test is just as conservative when the floors are
+     equal. So the power note above is optimistic for Q1 and Q1b, and nulls there are
+     read that way.
+   - **Coverage of the interval (change 2):** in each of these rows the true excess
+     gap is 0, and the interval excludes 0 exactly when the test rejects. So its
+     coverage of the true gap there is 1 minus the rejection rate: about 98.6–99.8%.
+2. **Intervals: every gap gets the interval that inverts its centered p-value.**
+   - With d the observed gap and d*_b the B resampled gaps, it is d ± h, where h is
+     the 95th percentile of |d*_b − d|. Exactly, h is the (m + 1)-th largest
+     |d*_b − d|, with m = ⌊0.05 (B + 1)⌋ − 1. It holds every value θ that a centered
+     test of "gap = θ" would not reject at 0.05. So it excludes 0 exactly when p ≤
+     0.05, and it is symmetric because the p-value is.
+   - It applies to every reported gap: the excess-ECE gap, the raw ECE gap, the Brier,
+     DA and IA gaps, the exploratory coverage differences, and Q4's transfer-vs-native
+     differences.
+   - The ±0.02 "practically equivalent" rule applies to this interval for the
+     excess-ECE gap.
+   - **Per decider,** excess ECE is reported with the same kind of interval, next to
+     raw ECE and the noise floor. Raw ECE is biased upward on finite samples, more so
+     for small n and many distinct confidence values. A perfectly calibrated decider's
+     expected ECE is its floor, not 0. The tables say so.
+   - Accuracy CIs stay percentile intervals; accuracy isn't a gap here.
+   - **A first choice was replaced.** The basic (centered) bootstrap interval,
+     [2d − q_hi, 2d − q_lo], was tried first, at the author's suggestion. On the fakes
+     it disagreed with the p-value in 18 of 178 ECE gaps: it excluded 0 while p > 0.05.
+     In the per-decider table it could even leave out its own estimate. The reason is
+     that the ECE of a resample carries its own upward bias, so the resampled gaps aren't
+     centred on the observed one. The basic interval reflects that offset, and the
+     centered p-value doesn't. It was replaced before any study result was seen. The
+     new interval agrees with its p-value for every gap on the fakes, and a test checks
+     that.
+3. **The DA and IA gaps move to secondary diagnostics.** They are reported with their
+   95% intervals, DA's ESS/N and the reversal flags, outside every family and with no
+   p-value in any table.
+   - The same holds for the descriptive raw ECE and Brier gaps and per-decider excess
+     ECE. Their centered p is kept in results.json only, as `p_not_tested`, so the
+     interval can be checked against it. Each table that shows them states the property above (the simulation
+   table) and the paper's caveat.
+   - The **raw Brier gap** stays as a descriptive number, because it depends on
+     accuracy.
+4. **S6: the UTC-day reading of "new fingerprint", as approved by the author.** A
+   fingerprint counts as new only if it first appears on a *later UTC day* than the
+   model's earliest calibration call on that dataset.
+   - Why: compared to the second, every fingerprint in a model's pool "first appears"
+     seconds after the earliest call, so the rule as written would flag the whole pool.
+   - The rest of S6 is unchanged: the 5% share and the split and restricted reports.
+5. **S6: a descriptive check is added.** For each model and dataset, the script reports
+   the fingerprint mix of the calibration half against that of the test half:
+   - each fingerprint's share of the calls in each half;
+   - fingerprints seen in only one half;
+   - the total-variation distance between the two mixes.
+
+   This is descriptive, not a test. It matters most for qwen3.8-27b on MT-Bench. Its new
+   fingerprints first appeared on 2026-11-26, the day its MT-Bench calibration started.
+   So the day rule counts them as part of that pool, not as a change, even if the test
+   half uses them in different proportions.
+
+Nothing else changes: Q2–Q4, F2, F4, S1–S5, the targets, the grid and the reporting rules
+stay as frozen.
