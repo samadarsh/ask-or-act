@@ -1,0 +1,42 @@
+# The analysis on the free baselines only (classic and majority; no LLM, no study run).
+label = "baselines"
+seen_ids = "configs/pilot/seen_test_ids.json"
+
+[[decider]]
+name = "classic"
+dataset = "banking77"
+kind = "classic"
+cal = "configs/baselines/classic-banking77-calibration.toml"
+test = "configs/baselines/classic-banking77.toml"
+
+[[decider]]
+name = "majority"
+dataset = "banking77"
+kind = "majority"
+test = "configs/baselines/majority-banking77.toml"
+
+[[decider]]
+name = "classic"
+dataset = "aegis"
+kind = "classic"
+cal = "configs/baselines/classic-aegis-calibration.toml"
+test = "configs/baselines/classic-aegis.toml"
+
+[[decider]]
+name = "majority"
+dataset = "aegis"
+kind = "majority"
+test = "configs/baselines/majority-aegis.toml"
+
+[[decider]]
+name = "classic"
+dataset = "mt_bench"
+kind = "classic"
+cal = "configs/baselines/classic-mt_bench-calibration.toml"
+test = "configs/baselines/classic-mt_bench.toml"
+
+[[decider]]
+name = "majority"
+dataset = "mt_bench"
+kind = "majority"
+test = "configs/baselines/majority-mt_bench.toml"

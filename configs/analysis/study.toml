@@ -1,0 +1,150 @@
+# The M7 analysis spec: every decider, run config and cascade in docs/analysis-plan.md
+# (FROZEN dc2ea31). Read by scripts/analyze_study.py. Nothing in a study run is read
+# until every config in the schedule below has a completed run.
+label = "study"
+schedule = "configs/study/schedule.toml"
+seen_ids = "configs/pilot/seen_test_ids.json"
+deviations = []
+
+[notes]
+banking77 = "the Banking77 target was registered 6 min 49 s after the first Banking77 pilot calls (docs/guarantees.md): not a clean pre-registration"
+
+[[decider]]
+name = "gpt-oss-120b"
+dataset = "banking77"
+kind = "llm"
+cal = "configs/study/gpt-oss-120b/banking77-calibration.toml"
+test = "configs/study/gpt-oss-120b/banking77-test.toml"
+sc_cal = "configs/study/gpt-oss-120b/banking77-calibration-sc.toml"
+sc_test = "configs/study/gpt-oss-120b/banking77-test-sc.toml"
+
+[[decider]]
+name = "qwen3.8-27b"
+dataset = "banking77"
+kind = "llm"
+cal = "configs/study/qwen3.8-27b/banking77-calibration.toml"
+test = "configs/study/qwen3.8-27b/banking77-test.toml"
+sc_cal = "configs/study/qwen3.8-27b/banking77-calibration-sc.toml"
+sc_test = "configs/study/qwen3.8-27b/banking77-test-sc.toml"
+
+[[decider]]
+name = "gpt-oss-20b"
+dataset = "banking77"
+kind = "llm"
+cal = "configs/study/gpt-oss-20b/banking77-calibration.toml"
+test = "configs/study/gpt-oss-20b/banking77-test.toml"
+sc_cal = "configs/study/gpt-oss-20b/banking77-calibration-sc.toml"
+sc_test = "configs/study/gpt-oss-20b/banking77-test-sc.toml"
+
+[[decider]]
+name = "classic"
+dataset = "banking77"
+kind = "classic"
+cal = "configs/baselines/classic-banking77-calibration.toml"
+test = "configs/baselines/classic-banking77.toml"
+
+[[decider]]
+name = "majority"
+dataset = "banking77"
+kind = "majority"
+test = "configs/baselines/majority-banking77.toml"
+
+[[decider]]
+name = "gpt-oss-120b"
+dataset = "aegis"
+kind = "llm"
+cal = "configs/study/gpt-oss-120b/aegis-calibration.toml"
+test = "configs/study/gpt-oss-120b/aegis-test.toml"
+sc_cal = "configs/study/gpt-oss-120b/aegis-calibration-sc.toml"
+sc_test = "configs/study/gpt-oss-120b/aegis-test-sc.toml"
+
+[[decider]]
+name = "qwen3.8-27b"
+dataset = "aegis"
+kind = "llm"
+cal = "configs/study/qwen3.8-27b/aegis-calibration.toml"
+test = "configs/study/qwen3.8-27b/aegis-test.toml"
+sc_cal = "configs/study/qwen3.8-27b/aegis-calibration-sc.toml"
+sc_test = "configs/study/qwen3.8-27b/aegis-test-sc.toml"
+
+[[decider]]
+name = "gpt-oss-20b"
+dataset = "aegis"
+kind = "llm"
+cal = "configs/study/gpt-oss-20b/aegis-calibration.toml"
+test = "configs/study/gpt-oss-20b/aegis-test.toml"
+sc_cal = "configs/study/gpt-oss-20b/aegis-calibration-sc.toml"
+sc_test = "configs/study/gpt-oss-20b/aegis-test-sc.toml"
+
+[[decider]]
+name = "gpt-oss-safeguard-20b"
+dataset = "aegis"
+kind = "llm"
+cal = "configs/study/gpt-oss-safeguard-20b/aegis-calibration.toml"
+test = "configs/study/gpt-oss-safeguard-20b/aegis-test.toml"
+sc_cal = "configs/study/gpt-oss-safeguard-20b/aegis-calibration-sc.toml"
+sc_test = "configs/study/gpt-oss-safeguard-20b/aegis-test-sc.toml"
+
+[[decider]]
+name = "classic"
+dataset = "aegis"
+kind = "classic"
+cal = "configs/baselines/classic-aegis-calibration.toml"
+test = "configs/baselines/classic-aegis.toml"
+
+[[decider]]
+name = "majority"
+dataset = "aegis"
+kind = "majority"
+test = "configs/baselines/majority-aegis.toml"
+
+[[decider]]
+name = "gpt-oss-120b"
+dataset = "mt_bench"
+kind = "llm"
+cal = "configs/study/gpt-oss-120b/mt_bench-calibration.toml"
+test = "configs/study/gpt-oss-120b/mt_bench-test.toml"
+sc_cal = "configs/study/gpt-oss-120b/mt_bench-calibration-sc.toml"
+sc_test = "configs/study/gpt-oss-120b/mt_bench-test-sc.toml"
+
+[[decider]]
+name = "qwen3.8-27b"
+dataset = "mt_bench"
+kind = "llm"
+cal = "configs/study/qwen3.8-27b/mt_bench-calibration.toml"
+test = "configs/study/qwen3.8-27b/mt_bench-test.toml"
+sc_cal = "configs/study/qwen3.8-27b/mt_bench-calibration-sc.toml"
+sc_test = "configs/study/qwen3.8-27b/mt_bench-test-sc.toml"
+
+[[decider]]
+name = "classic"
+dataset = "mt_bench"
+kind = "classic"
+cal = "configs/baselines/classic-mt_bench-calibration.toml"
+test = "configs/baselines/classic-mt_bench.toml"
+
+[[decider]]
+name = "majority"
+dataset = "mt_bench"
+kind = "majority"
+test = "configs/baselines/majority-mt_bench.toml"
+
+[[cascade]]
+dataset = "banking77"
+stages = ["gpt-oss-20b", "gpt-oss-120b"]
+
+[[cascade]]
+dataset = "banking77"
+stages = ["classic", "gpt-oss-120b"]
+
+[[cascade]]
+dataset = "aegis"
+stages = ["gpt-oss-safeguard-20b", "gpt-oss-120b"]
+
+[[cascade]]
+dataset = "aegis"
+stages = ["gpt-oss-20b", "gpt-oss-120b"]
+
+[[cascade]]
+dataset = "aegis"
+stages = ["classic", "gpt-oss-120b"]
